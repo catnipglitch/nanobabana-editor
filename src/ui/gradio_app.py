@@ -1,7 +1,7 @@
 """
 Gradio UI Application (5-Tab Architecture with Tab Classes)
 
-nanobabana-editorのGradioインターフェース（タブクラス分離版）。
+nanobanana-editorのGradioインターフェース（タブクラス分離版）。
 5つのタブで構成:
 - Tab 1: 画像生成（Gemini）
 - Tab 2: 画像生成（Imagen）
@@ -51,8 +51,8 @@ from src.ui.tabs import (
 load_dotenv()
 
 
-class NanobabanaApp:
-    """nanobabana-editorアプリケーション（4タブ版）"""
+class NanobananaApp:
+    """nanobanana-editorアプリケーション（4タブ版）"""
 
     def __init__(self, test_mode: bool = False):
         """
@@ -177,8 +177,8 @@ class NanobabanaApp:
 
     def create_ui(self):
         """Gradio UIを作成（5タブ構成：タブクラス分離版）"""
-        with gr.Blocks(title="nanobabana-editor", theme=gr.themes.Soft()) as demo:
-            gr.Markdown("# nanobabana-editor")
+        with gr.Blocks(title="nanobanana-editor", theme=gr.themes.Soft()) as demo:
+            gr.Markdown("# nanobanana-editor")
             gr.Markdown("画像生成・編集ツール - Gemini & Imagen 完全分離アーキテクチャ")
 
             # APIキー未設定時の警告バナー
@@ -210,7 +210,7 @@ def main():
     """メイン関数"""
     import argparse
 
-    parser = argparse.ArgumentParser(description="nanobabana-editor Gradio UI (4-Tab Architecture)")
+    parser = argparse.ArgumentParser(description="nanobanana-editor Gradio UI (4-Tab Architecture)")
     parser.add_argument("--test", action="store_true", help="テストモード（APIキーなし）")
     parser.add_argument("--share", action="store_true", help="公開リンクを生成")
     parser.add_argument("--server-name", type=str, default="127.0.0.1", help="サーバー名")
@@ -218,7 +218,7 @@ def main():
 
     args = parser.parse_args()
 
-    app = NanobabanaApp(test_mode=args.test)
+    app = NanobananaApp(test_mode=args.test)
     app.launch(
         share=args.share,
         server_name=args.server_name,

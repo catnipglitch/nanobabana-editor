@@ -1,7 +1,7 @@
 """
 Gradio UI Application
 
-nanobabana-editorのGradioインターフェース。
+nanobanana-editorのGradioインターフェース。
 3つのタブで構成:
 - Tab 1: 画像生成
 - Tab 2: 画像編集
@@ -43,8 +43,8 @@ from src.core.model_specs import ModelRegistry, GeminiModelRegistry, ImagenModel
 load_dotenv()
 
 
-class NanobabanaApp:
-    """nanobabana-editorアプリケーション"""
+class NanobananaApp:
+    """nanobanana-editorアプリケーション"""
 
     def __init__(self, test_mode: bool = False):
         """
@@ -653,8 +653,8 @@ class NanobabanaApp:
 
     def create_ui(self):
         """Gradio UIを作成（4タブ構成）"""
-        with gr.Blocks(title="nanobabana-editor", theme=gr.themes.Soft()) as demo:
-            gr.Markdown("# nanobabana-editor")
+        with gr.Blocks(title="nanobanana-editor", theme=gr.themes.Soft()) as demo:
+            gr.Markdown("# nanobanana-editor")
             gr.Markdown("画像生成・編集ツール - Gemini & Imagen 完全分離アーキテクチャ")
 
             with gr.Tabs():
@@ -917,7 +917,7 @@ class NanobabanaApp:
             # フッター
             gr.Markdown("""
 ---
-**nanobabana-editor** - 画像生成・編集ツール
+**nanobanana-editor** - 画像生成・編集ツール
 出力ファイルは `output/` ディレクトリに保存されます
 """)
 
@@ -951,7 +951,7 @@ def main(test_mode: bool = False):
             print()
             test_mode = True
 
-    app = NanobabanaApp(test_mode=test_mode)
+    app = NanobananaApp(test_mode=test_mode)
     demo = app.create_ui()
 
     # ローカルで起動

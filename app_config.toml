@@ -1,5 +1,5 @@
 # アプリケーション設定ファイル
-# nanobabana-editor の全体設定とプロンプトテンプレート
+# nanobanana-editor の全体設定とプロンプトテンプレート
 
 # UI設定
 [ui]
@@ -9,7 +9,7 @@
 default_tab = "gemini"
 
 # プロンプトテンプレート
-# nanobabana-editor で使用するサンプルプロンプト集
+# nanobanana-editor で使用するサンプルプロンプト集
 # Note: modelフィールドは削除されました（Phase 2.5: Gemini/Imagen完全分離）
 [[templates]]
 name = "人物-ファストファッション男性-全身"

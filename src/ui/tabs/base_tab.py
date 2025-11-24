@@ -8,16 +8,16 @@ from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ..gradio_app import NanobabanaApp
+    from ..gradio_app import NanobananaApp
 
 
 class BaseTab(ABC):
     """タブの抽象基底クラス"""
 
-    def __init__(self, app: 'NanobabanaApp'):
+    def __init__(self, app: 'NanobananaApp'):
         """
         Args:
-            app: NanobabanaApp インスタンス（ジェネレーター、設定などにアクセス）
+            app: NanobananaApp インスタンス（ジェネレーター、設定などにアクセス）
         """
         self.app = app
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nanobabana-editor Gradio アプリケーションのエントリーポイント
+nanobanana-editor Gradio アプリケーションのエントリーポイント
 
 使用例:
     python app.py              # 通常モード

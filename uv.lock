@@ -1017,7 +1017,7 @@ wheels = [
 ]
 
 [[package]]
-name = "nanobabana-editor-internal"
+name = "nanobanana-editor-internal"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
