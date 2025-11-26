@@ -42,7 +42,7 @@ Nanobanana アルファマット生成サンプル
 
 ■ 出力ファイル (output/ディレクトリ)
   - *_expanded.png: キャンバス拡張後の画像
-  - *_matte.png: 生成されたアルファマット
+  - *_matte.jpg または *_matte.png: 生成されたアルファマット（実際のフォーマットに応じた拡張子）
   - *_rgba.png: 最終的なRGBA合成画像
   - *.json: メタデータ
 
@@ -51,6 +51,7 @@ Nanobanana アルファマット生成サンプル
 """
 
 import os
+import sys
 import json
 from datetime import datetime
 from pathlib import Path
@@ -61,6 +62,12 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from PIL import Image
+
+# プロジェクトルートをパスに追加
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
+
+from src.core.image_utils import get_file_extension
 
 # 環境変数を読み込み
 load_dotenv()
@@ -457,9 +464,21 @@ def main() -> None:
 
     # Step 4: アルファマット画像を保存
     print_step(4, 5, "アルファマット画像を保存中...")
+    
+    # 実際の画像フォーマットを検出して正しい拡張子を使用
+    detected_ext = get_file_extension(alpha_matte_data)
+    
+    # 元のファイル名から拡張子を除いたベース名を取得して新しい拡張子で再構築
+    matte_base = output_files["matte"].stem  # ファイル名から拡張子を除いた部分
+    matte_path = OUTPUT_DIR / f"{matte_base}.{detected_ext}"
+    
+    # ファイル名を更新
+    output_files["matte"] = matte_path
+    
     with open(output_files["matte"], "wb") as f:
         f.write(alpha_matte_data)
     print(f"保存完了: {output_files['matte']}")
+    print(f"検出されたフォーマット: {detected_ext.upper()}")
 
     # Step 5: RGBA画像合成
     print_step(5, 5, "RGBA画像合成中...")
