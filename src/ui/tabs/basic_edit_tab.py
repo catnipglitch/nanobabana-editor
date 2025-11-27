@@ -1,13 +1,15 @@
 """
 Basic Edit Tab
 
-ベーシック編集タブ（人物のアルファチャンネル切り抜き・背景除去）
+ベーシック編集タブ（シンプルな1回編集・アップスケール）
 """
 
 import gradio as gr
 import logging
 import json
 import base64
+import random
+import string
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, TYPE_CHECKING
@@ -18,262 +20,19 @@ from google.genai import types
 
 from .base_tab import BaseTab
 from ...core.tab_specs import TAB_BASIC_EDIT
+from ...core.prompt_optimizer import PromptOptimizer
+from .prompts.basic_edit_prompts import UPSCALE_ONLY_PROMPT
 
 if TYPE_CHECKING:
     from ..gradio_app import NanobananaApp
 
 logger = logging.getLogger(__name__)
 
-
-
-
-
-
-
-#入力画像1は人物のポートレートです。  
-#広告素材として利用できるよう、人物を丁寧に切り抜き、背景の要素をすべて取り除きなさい。  
-#ライティングは元の写真の状態を忠実に再現し、光の方向、強さ、色温度、肌の反射などを変更してはならない。  
-#人物の姿勢や構図は元のまま保持し、体型・表情・衣服の色を変えずに自然に保ちなさい。  
-#人物の輪郭や髪の毛の細部は滑らかに処理し、透明背景でノイズのない広告向けの素材として仕上げなさい。  
-#最終的な画像は指定された出力サイズに合わせて高品質にアップスケールしなさい。
-
-
-#✦ パターン１
-#元の写真を忠実に活かす・切り抜き＋元のライティング＋姿勢そのまま
-
-UPSCALE_PROMPT_1 = (
-    "Input Image 1 is a portrait of a person.  "
-    "Prepare it as an advertising asset by carefully extracting the person and removing all background elements.  "
-    "Reproduce the original lighting faithfully, without altering the direction, intensity, color temperature, or reflections on the skin.  "
-    "Keep the posture and composition exactly as in the original image, preserving the person’s body shape, expression, and clothing colors.  "
-    "Maintain smooth edges and detailed hair strands, and output a clean, transparent background suitable for compositing.  "
-    "Finally, upscale the image to match the required output resolution with high quality."
-)
-
-
-#入力画像1は人物のポートレートです。  
-#広告素材として利用できるよう、人物のみを丁寧に切り抜き、背景を完全に取り除きなさい。  
-#ライティングは均一でフラットなスタジオ光に整え、影の方向性が強まる照明やレンブラントライトのような演出を避けること。  
-#人物はスタジオで自然に立っている姿勢として再構築しなさい。  
-#両足に重心を均等に置き、腕は身体から少し離し、表情はナチュラルでニュートラルな素材向けとすること。  
-#元の写真に写っていない下半身や手足などがある場合は、人物の体格と雰囲気に合わせて自然に想像し補完しなさい。  
-#人物の特徴や衣服の色は変えず、広告合成に適した透明背景で仕上げること。  
-#最終画像は出力サイズに合わせて高品質にアップスケールしなさい。
-
-
-
-#✦ パターン２
-#切り抜き＋スタジオ風ライティング化（姿勢はそのまま）
-
-UPSCALE_PROMPT_2 = (
-    "Input Image 1 is a portrait of a person.  "
-    "Extract the person cleanly and remove the background to prepare the subject for advertising use.  "
-    "Adjust the lighting to a flat, even studio style, avoiding dramatic shadows or directional highlights.  "
-    "Ensure the illumination and color temperature remain neutral so the figure blends naturally with any presentation or design material.  "
-    "Preserve the original posture and composition without altering the subject’s features or color tones.  "
-    "Finally, upscale the image to the required output size with high resolution."
-)
-
-
-
-#入力画像1は人物のポートレートです。  
-#広告素材として利用できるよう、人物のみを丁寧に切り抜き、背景を完全に取り除きなさい。  
-#ライティングは均一でフラットなスタジオ光に整え、影の方向性が強まる照明やレンブラントライトのような演出を避けること。  
-#人物はスタジオで自然に立っている姿勢として再構築しなさい。  
-#両足に重心を均等に置き、腕は身体から少し離し、表情はナチュラルでニュートラルな素材向けとすること。  
-#元の写真に写っていない下半身や手足などがある場合は、人物の体格と雰囲気に合わせて自然に想像し補完しなさい。  
-#人物の特徴や衣服の色は変えず、広告合成に適した透明背景で仕上げること。  
-#最終画像は出力サイズに合わせて高品質にアップスケールしなさい。
-
-#パターン３
-#**切り抜き＋スタジオ立ち姿（ポーズ補完あり）
-#※見えない部分は自然に再構築する広告特化モデル**
-UPSCALE_PROMPT_3 = (
-    "Input Image 1 is a portrait of a person.  "
-    "Extract the subject cleanly and remove all background elements to prepare the figure for advertising use.  "
-    "Adjust the lighting to a flat, uniform studio style, avoiding dramatic shadows or Rembrandt-style highlights.  "
-    "Reconstruct the person as standing naturally in a studio setting, with weight evenly distributed on both feet, arms slightly away from the body, and a neutral, natural expression suitable for commercial assets.  "
-    "If any body parts are missing—such as the lower body, hands, or legs—extend and complete them naturally based on the subject’s physique and appearance.  "
-    "Preserve the subject’s inherent features and clothing colors, and output a clean transparent background for easy compositing.  "
-    "Finally, upscale the image to the required output resolution with high quality."
-)
-
-# シンプルなアップスケールプロンプト定義（未使用、サンプルコードから移植）
-UPSCALE_PROMPT_4 = (
-""
-  )
-
-
-
-# アルファマットプロンプト定義（サンプルコードから移植）
-
-# キャラクター用（イラスト）
-# 参考訳：
-# 入力画像のキャラクターの、プロフェッショナルな高精度グレースケールアルファマットを生成してください。
-# 背景は純粋な黒（#000000）である必要があります。
-# キャラクターの体、髪、装着しているアクセサリーは白でレンダリングしてください。
-# 重要：半透明部分（細い髪の毛、レース生地、透明プラスチックなど）は、
-# 不透明度レベルを示す正確なグレーの階調を使用して表現してください。
-# 影、床の反射、床に置かれた切り離されたオブジェクト（かばんや被っていない帽子など）は
-# 厳密に除外してマスクアウトしてください。
-# 出力は、プロフェッショナルな合成に適した、クリーンでノイズのないセグメンテーションマスクである必要があります。
-ALPHA_MATTE_PROMPT_CHARACTER = (
-    "A professional high-precision grayscale alpha matte of the character from the input image. "
-    "The background must be pure black (Hex #000000). "
-    "The character's body, hair, and worn accessories must be rendered in white. "
-    "Crucially, represent semi-transparency (e.g., fine hair strands, lace fabric, transparent plastic) "
-    "using accurate shades of gray to indicate opacity levels. "
-    "Strictly exclude and mask out any cast shadows, floor reflections, and detached objects placed on the floor "
-    "(such as bags or hats not being worn). "
-    "The output should be a clean, noise-free segmentation mask suitable for professional compositing."
-)
-
-# 人物用（実写）- V1
-# 参考訳：
-# 入力画像の人物の、プロフェッショナルな高精度グレースケールアルファマットを生成してください。
-# 背景は純粋な黒（#000000）である必要があります。
-# 人物の肌（顔、腕、脚、体）は、ソリッドな不透明の白でレンダリングしてください - 肌は決して透明ではありません。
-# 髪、衣服、アクセサリーは白でレンダリングしてください。
-# グレーの階調を使用した半透明表現は、次の場合のみ適用してください：
-# - エッジの細い髪の毛
-# - 透明またはシアーな生地（レース、チュール、オーガンザ）
-# - 透明なアクセサリー（眼鏡、プラスチック製品）
-# 肌、ソリッドな衣服、メインボディは常にソリッドな不透明の白である必要があります。
-# 影、床の反射、床に置かれた切り離されたオブジェクトは厳密に除外してマスクアウトしてください。
-# 出力は、プロフェッショナルな合成に適した、クリーンでノイズのないセグメンテーションマスクである必要があります。
-ALPHA_MATTE_PROMPT_HUMAN = (
-    "A professional high-precision grayscale alpha matte of the person from the input image. "
-    "The background must be pure black (Hex #000000). "
-    "The person's skin (face, arms, legs, body) must be rendered as solid opaque white - skin is never transparent. "
-    "Hair, clothing, and accessories must be rendered in white. "
-    "Semi-transparency using gray shades should ONLY be applied to: "
-    "- Fine hair strands at the edges "
-    "- Transparent or sheer fabric (lace, tulle, organza) "
-    "- Transparent accessories (glasses, plastic items). "
-    "Skin, solid clothing, and the main body must always be solid opaque white. "
-    "Strictly exclude and mask out any cast shadows, floor reflections, and detached objects on the floor. "
-    "The output should be a clean, noise-free segmentation mask suitable for professional compositing."
-)
-
-# 人物用（実写）- V2
-# 参考訳：
-# 人物のプロフェッショナルな高精度グレースケールアルファマットを生成してください。
-# 背景は純粋な黒（#000000）である必要があります。
-# 【最重要】色と透明度の分離指示：
-# 被写体の元の色や影を透明度と混同しないでください。
-# 暗い色（衣服の黒いストライプや暗い髪など）は透明ではなく、ソリッドな白でレンダリングする必要があります。
-# 絶対的な不透明（白）領域の定義：
-# 以下の領域は、内部に灰色のピクセルを一切含まない、完全に均一なソリッドな不透明の白（#FFFFFF）領域としてレンダリングする必要があります：
-# 1. 肌の全領域（顔、腕、体）。肌は決して透明ではありません。
-# 2. 衣服の全領域（すべてのパターンやストライプを含む）。生地はソリッドです。
-# 3. 髪の塊のメインボディ。
-# 4. ソリッドなアクセサリーや眼鏡のフレーム。
-# 眼鏡の特別ルール：
-# 肌の上に位置する透明なレンズは、下の肌が不透明であるため、ソリッドな白でレンダリングする必要があります。
-# 半透明（グレー）の限定的な適用：
-# エッジの部分でのみ、グレーの階調を使用して半透明を正確に表現してください：
-# - 背景に移行する細い個別の髪の毛
-# - 本当にシアーな生地（レースなど）が背景と接するエッジ
-# 最終出力は、メイン被写体がソリッドな白いシルエットで、グレーがエッジの精細化にのみ使用される、
-# クリーンなセグメンテーションマスクである必要があります。
-ALPHA_MATTE_PROMPT_HUMAN_V2 = (
-    "A professional high-precision grayscale alpha matte of the person. "
-    "Background must be pure black (#000000). "
-    # --- 【最重要】色と透明度の分離指示 ---
-    "CRITICAL: Do NOT confuse the subject's original colors or shadows with transparency. "
-    "Dark colors (like black stripes on clothes or dark hair) are NOT transparent and must be rendered as solid white. "
-    # --- 絶対的な不透明（白）領域の定義 ---
-    "The following areas must be rendered as a completely uniform, solid opaque white (#FFFFFF) area with absolutely NO gray pixels inside: "
-    "1. The entire area of skin (face, arms, body). Skin is never transparent. "
-    "2. The entire area of clothing, INCLUDING all patterns and stripes. The fabric is solid. "
-    "3. The main body of the hair mass. "
-    "4. Solid accessories and frames of glasses. "
-    # --- 眼鏡の特別ルール（ユーザー意図への対応） ---
-    "Special Rule for Glasses: Transparent lenses located ON TOP OF the skin area must be rendered as solid white, because the skin underneath is opaque. "
-    # --- 半透明（グレー）の限定的な適用 ---
-    "Only use shades of gray for accurately representing semi-transparency at the very edges: "
-    "- Fine, individual hair strands transitioning to the background. "
-    "- Edges of truly sheer fabrics (like lace) where they meet the background. "
-    "The final output must be a clean segmentation mask where the main subject is a solid white silhouette, and gray is used only for edge refinement."
-)
-
-# 人物用（実写）- 推奨（汎用版）
-# 参考訳：
-# 入力画像の人物の、プロフェッショナルな高精度グレースケールアルファマットを生成してください。
-# 背景は純粋な黒（#000000）である必要があります。
-# 【汎用化】色と透明度の分離指示：
-# 特定の柄ではなく「暗い色や影、柄」全般を対象にします
-# 被写体の元の色、照明の影、暗いテクスチャを透明度と混同しないでください。
-# 暗い領域（黒い衣服、暗い髪、深い影、プリントパターンなど）は透明ではなく、
-# ソリッドな白でレンダリングする必要があります。
-# 絶対的な不透明（白）領域の定義：
-# 以下の領域は、内部に灰色のピクセルを一切含まない、完全に均一なソリッドな不透明の白（#FFFFFF）領域としてレンダリングする必要があります：
-# 1. 肌の全領域。肌は決して透明ではありません。
-# 2. 衣服の全領域（色、パターン、プリント、ロゴに関係なく）。生地自体はソリッドです。
-# 3. 髪の塊のメインボディ。
-# 4. ソリッドなアクセサリーや眼鏡のフレーム。
-# 眼鏡・透過物の汎用ルール：
-# 肌や衣服の上に位置する透明なアイテム（眼鏡のレンズなど）は、
-# 下のオブジェクトが不透明であるため、ソリッドな白でレンダリングする必要があります。
-# 半透明（グレー）の限定的な適用：
-# エッジの部分でのみ、グレーの階調を使用して半透明を正確に表現してください：
-# - 背景に移行する細い個別の髪の毛
-# - 本当にシアーな生地（レースなど）が背景と接するエッジ
-# 最終出力は、メイン被写体がソリッドな白いシルエットで、グレーがエッジの精細化にのみ使用される、
-# クリーンなセグメンテーションマスクである必要があります。
-ALPHA_MATTE_PROMPT_HUMAN_GENERIC_BOTU = (
-    "A professional high-precision grayscale alpha matte of the person from the input image. "
-    "Background must be pure black (#000000). "
-    # --- 【汎用化】色と透明度の分離指示 ---
-    # 特定の柄ではなく「暗い色や影、柄」全般を対象にします
-    "CRITICAL: Do NOT confuse the subject's original colors, lighting shadows, or dark textures with transparency. "
-    "Dark areas (such as black clothing, dark hair, deep shadows, or printed patterns) are NOT transparent and must be rendered as solid white. "
-    # --- 絶対的な不透明（白）領域の定義 ---
-    "The following areas must be rendered as a completely uniform, solid opaque white (#FFFFFF) area with absolutely NO gray pixels inside: "
-    "1. The entire area of skin. Skin is never transparent. "
-    "2. The entire area of clothing, regardless of its color, pattern, print, or logo. The fabric itself is solid. "
-    "3. The main body of the hair mass. "
-    "4. Solid accessories and frames of glasses. "
-    # --- 眼鏡・透過物の汎用ルール ---
-    "Rule for Transparent Objects: Transparent items (like glasses lenses) located ON TOP OF the skin or clothing must be rendered as solid white, because the object underneath is opaque. "
-    # --- 半透明（グレー）の限定的な適用 ---
-    "Only use shades of gray for accurately representing semi-transparency at the very edges: "
-    "- Fine, individual hair strands transitioning to the background. "
-    "- Edges of truly sheer fabrics (like lace) where they meet the background. "
-    "The final output must be a clean segmentation mask where the main subject is a solid white silhouette, and gray is used only for edge refinement."
-)
-ALPHA_MATTE_PROMPT_HUMAN_GENERIC = (
-    "A professional high-precision grayscale alpha matte of the person from the input image. "
-    "Background must be pure black (#000000). "
-    # --- 【汎用化】色と透明度の分離指示 ---
-    # 特定の柄ではなく「暗い色や影、柄」全般を対象にします
-    "CRITICAL: Do NOT confuse the subject's original colors, lighting shadows, or dark textures with transparency. "
-    "Dark areas (such as black clothing, dark hair, deep shadows, or printed patterns) are NOT transparent and must be rendered as solid white. "
-    # --- 絶対的な不透明（白）領域の定義 ---
-    "The following areas must be rendered as a completely uniform, solid opaque white (#FFFFFF) area with absolutely NO gray pixels inside: "
-    "1. The entire area of skin. Skin is never transparent. "
-    "2. The entire area of clothing, regardless of its color, pattern, print, or logo. The fabric itself is solid. "
-    "3. The main body of the hair mass. "
-    # --- 半透明（グレー）の限定的な適用 ---
-    "Only use shades of gray for accurately representing semi-transparency at the very edges: "
-    "- Fine, individual hair strands transitioning to the background. "
-    "- Edges of truly sheer fabrics (like lace) where they meet the background. "
-    "The final output must be a clean segmentation mask where the main subject is a solid white silhouette, and gray is used only for edge refinement."
-)
-
-
 class BasicEditTab(BaseTab):
-    """ベーシック編集タブ（人物のアルファチャンネル切り抜き）"""
+    """ベーシック編集タブ（シンプルな1回編集・アップスケール）"""
 
     def __init__(self, app: "NanobananaApp"):
         super().__init__(app)
-        # アルファマットプロンプトマップ
-        self.ALPHA_MATTE_PROMPTS = {
-            "人物用（実写）- 推奨": ALPHA_MATTE_PROMPT_HUMAN_GENERIC,
-            "人物用（実写）- V2": ALPHA_MATTE_PROMPT_HUMAN_V2,
-            "人物用（実写）- V1": ALPHA_MATTE_PROMPT_HUMAN,
-            "キャラクター用（イラスト）": ALPHA_MATTE_PROMPT_CHARACTER,
-        }
 
     @staticmethod
     def calculate_target_resolution(
@@ -309,49 +68,6 @@ class BasicEditTab(BaseTab):
         return width, height
 
     @staticmethod
-    def determine_edit_prompt(
-        input_size: tuple[int, int],
-        target_size: tuple[int, int],
-        enable_lighting: bool = True,
-    ) -> tuple[str, str]:
-        """
-        入力画像サイズと目標サイズを比較して、適切な編集プロンプトを生成する
-
-        Args:
-            input_size: 入力画像サイズ (width, height)
-            target_size: 目標サイズ (width, height)
-            enable_lighting: ライティング調整を有効にするか（現在は未使用、UPSCALE_PROMPT_3に統合済み）
-
-        Returns:
-            (編集プロンプト, 編集タイプ)
-        """
-        input_w, input_h = input_size
-        target_w, target_h = target_size
-
-        # アスペクト比を計算（小数点4桁で比較）
-        input_ratio = round(input_w / input_h, 4)
-        target_ratio = round(target_w / target_h, 4)
-
-        # サイズが完全に一致 - UPSCALE_PROMPT_3を使用（シャープニングも含む）
-        if input_w == target_w and input_h == target_h:
-            prompt = UPSCALE_PROMPT_3
-            return prompt, "sharpen"
-
-        # 縮小が必要（入力が目標より大きい）- UPSCALE_PROMPT_3を使用
-        if input_w > target_w or input_h > target_h:
-            prompt = UPSCALE_PROMPT_3
-            return prompt, "downscale"
-
-        # 拡大が必要（入力が目標より小さく、比率が同じ）- UPSCALE_PROMPT_3を使用
-        if abs(input_ratio - target_ratio) < 0.01:  # ほぼ同じ比率
-            prompt = UPSCALE_PROMPT_3
-            return prompt, "upscale"
-
-        # 生成拡張が必要（入力が目標より小さく、比率が異なる）- UPSCALE_PROMPT_3を使用
-        prompt = UPSCALE_PROMPT_3
-        return prompt, "generative_expand"
-
-    @staticmethod
     def compose_alpha_channel(rgb_img: Image.Image, alpha_bytes: bytes) -> bytes:
         """
         RGB画像とアルファマット画像を合成してRGBA PNG画像を生成する
@@ -383,25 +99,14 @@ class BasicEditTab(BaseTab):
         rgba_img.save(output_buffer, format="PNG")
         return output_buffer.getvalue()
 
-    def edit_with_alpha_matte(
-        self,
-        process_type: str,
-        model_name: str,
-        input_image: Optional[Image.Image],
-        prompt_text: str,
-        aspect_ratio: str,
-        resolution: str,
-        lighting_enabled: bool,
-        alpha_prompt_choice: str,
-        save_edited_image: bool,
-    ) -> tuple[
-        Optional[Image.Image], Optional[Image.Image], Optional[Image.Image], str, str
-    ]:
+    def _validate_inputs(
+        self, input_image: Optional[Image.Image]
+    ) -> Optional[tuple[None, None, None, str, str]]:
         """
-        マルチターン編集 + RGBA合成
+        入力検証（APIキーと入力画像）
 
         Returns:
-            (output_img1, output_img2, output_img3, info_text, json_log)
+            エラーがある場合はエラーレスポンスタプル、問題なければNone
         """
         # 1. 入力検証: APIキー
         if not self.app.google_api_key or self.app.gemini_generator is None:
@@ -421,182 +126,301 @@ class BasicEditTab(BaseTab):
         if input_image is None:
             return None, None, None, "⚠ 入力画像をアップロードしてください", ""
 
-        try:
-            # 3. RGB変換（アルファチャンネル削除）
-            if input_image.mode == "RGBA":
-                background = Image.new("RGB", input_image.size, (255, 255, 255))
-                background.paste(input_image, mask=input_image.split()[3])
-                input_image = background
-            elif input_image.mode != "RGB":
-                input_image = input_image.convert("RGB")
+        return None
 
-            input_w, input_h = input_image.size
+    def _execute_multi_turn_edit(
+        self,
+        input_image: Image.Image,
+        model_name: str,
+        prompt_text: str,
+        optimization_level: int,
+        process_num: int,
+        aspect_ratio: str,
+        resolution: str,
+        lighting_enabled: bool,
+        alpha_prompt_choice: str,
+        pre_optimized_prompt: Optional[str] = None,  # NEW PARAMETER
+    ) -> tuple[
+        Optional[tuple[Image.Image, bytes, int, int]],  # (edited_img, edited_img_data, w, h)
+        Optional[tuple[Image.Image, bytes]],  # (alpha_matte_img, alpha_matte_data)
+        Optional[tuple[Image.Image, bytes]],  # (rgba_img, rgba_bytes)
+        tuple[int, int],  # (input_w, input_h)
+        tuple[int, int],  # (target_w, target_h)
+        str,  # edit_type
+        Optional[str],  # optimized_prompt_info (最適化エラーメッセージ or None)
+    ]:
+        """
+        マルチターン編集を実行（Gemini API呼び出し + RGBA合成）
 
-            # 4. 目標解像度計算
-            target_w, target_h = self.calculate_target_resolution(
-                aspect_ratio, resolution
-            )
+        Args:
+            process_num: 処理タイプ番号（1/2/3）
+            optimization_level: プロンプト最適化レベル（0/1/2）
+            pre_optimized_prompt: 既に最適化されたプロンプト（UI経由）
 
-            # 5. 編集プロンプト生成
-            edit_prompt, edit_type = self.determine_edit_prompt(
-                (input_w, input_h), (target_w, target_h), lighting_enabled
-            )
+        Returns:
+            (edited_result, alpha_result, rgba_result, input_size, target_size, edit_type, optimized_prompt_info)
+            エラー時は各resultがNoneになる可能性あり
+        """
+        # RGB変換（アルファチャンネル削除）
+        if input_image.mode == "RGBA":
+            background = Image.new("RGB", input_image.size, (255, 255, 255))
+            background.paste(input_image, mask=input_image.split()[3])
+            input_image = background
+        elif input_image.mode != "RGB":
+            input_image = input_image.convert("RGB")
 
-            # 追加指示があれば追加
-            if prompt_text and prompt_text.strip():
-                edit_prompt += f"\n\nAdditional instructions: {prompt_text.strip()}"
+        input_w, input_h = input_image.size
 
-            # 6. 入力画像をバイナリ化
-            img_buffer = BytesIO()
-            input_image.save(img_buffer, format="PNG")
-            img_bytes = img_buffer.getvalue()
+        # 目標解像度計算
+        target_w, target_h = self.calculate_target_resolution(aspect_ratio, resolution)
 
-            # 7. Geminiチャット作成
-            client = genai.Client(api_key=self.app.google_api_key, vertexai=False)
+        # プロンプト選択ロジック
+        optimized_prompt_error = None
 
-            chat = client.chats.create(
-                model=model_name,
-                config=types.GenerateContentConfig(
-                    response_modalities=["TEXT", "IMAGE"],
-                    image_config=types.ImageConfig(
-                        aspect_ratio=aspect_ratio, image_size=resolution
-                    ),
-                ),
-            )
-
-            # 8. 1ターン目: 画像編集
-            logger.info(f"Sending turn 1: Image editing (type: {edit_type})")
-            response_1 = chat.send_message(
-                [
-                    edit_prompt,
-                    types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
-                ]
-            )
-
-            # 編集画像を取得
-            edited_img_data = None
-            for part in response_1.parts:
-                if part.text is not None:
-                    logger.info(f"API response (turn 1): {part.text}")
-                elif hasattr(part, "inline_data") and part.inline_data:
-                    data_field = part.inline_data.data
-                    if isinstance(data_field, str):
-                        edited_img_data = base64.b64decode(data_field)
-                    else:
-                        edited_img_data = data_field
-
-            if edited_img_data is None:
-                return None, None, None, "エラー: 編集画像を取得できませんでした", ""
-
-            # 編集画像をPIL Imageに変換
-            edited_img = Image.open(BytesIO(edited_img_data))
-            edited_w, edited_h = edited_img.size
-            logger.info(f"Edited image size: {edited_w}x{edited_h}")
-
-            # 9. 2ターン目: アルファマット生成
-            alpha_prompt = self.ALPHA_MATTE_PROMPTS[alpha_prompt_choice]
-            logger.info("Sending turn 2: Alpha matte generation")
-            response_2 = chat.send_message(alpha_prompt)
-
-            # アルファマット画像を取得
-            alpha_matte_data = None
-            for part in response_2.parts:
-                if part.text is not None:
-                    logger.info(f"API response (turn 2): {part.text}")
-                elif hasattr(part, "inline_data") and part.inline_data:
-                    data_field = part.inline_data.data
-                    if isinstance(data_field, str):
-                        alpha_matte_data = base64.b64decode(data_field)
-                    else:
-                        alpha_matte_data = data_field
-
-            if alpha_matte_data is None:
-                return (
-                    edited_img,
-                    None,
-                    None,
-                    "エラー: アルファマット画像を取得できませんでした",
-                    "",
+        if pre_optimized_prompt:
+            # UI経由で既に最適化されたプロンプトが渡された場合
+            edit_prompt = pre_optimized_prompt
+            edit_type = "PRE_OPTIMIZED (UI経由)"
+            logger.info("Using pre-optimized prompt from UI")
+        else:
+            # 処理タイプに応じた基本プロンプト選択
+            if process_num == 1:
+                # 処理1: 従来のロジック（determine_edit_promptを使用）
+                edit_prompt, edit_type = self.determine_edit_prompt(
+                    (input_w, input_h), (target_w, target_h), lighting_enabled
+                )
+            elif process_num == 2:
+                # 処理2: ポーズ変更なしの背景除去
+                edit_prompt = PRESERVE_POSE_PROMPT
+                edit_type = "PRESERVE_POSE (ポーズ維持)"
+            elif process_num == 3:
+                # 処理3: 生成アップスケールのみ
+                edit_prompt = UPSCALE_ONLY_PROMPT
+                edit_type = "UPSCALE_ONLY (アップスケール)"
+            else:
+                # フォールバック（通常ここには来ない）
+                edit_prompt, edit_type = self.determine_edit_prompt(
+                    (input_w, input_h), (target_w, target_h), lighting_enabled
                 )
 
-            # アルファマット画像をPIL Imageに変換（表示用）
-            alpha_matte_img = Image.open(BytesIO(alpha_matte_data))
-
-            # 10. RGBA合成（ローカル処理）
-            rgba_bytes = self.compose_alpha_channel(edited_img, alpha_matte_data)
-            rgba_img = Image.open(BytesIO(rgba_bytes))
-
-            # 11. ファイル保存
-            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-            import random
-            import string
-
-            unique_id = "".join(
-                random.choices(string.ascii_lowercase + string.digits, k=6)
-            )
-            base_filename = f"alpha_matte_{timestamp}_{unique_id}"
-
-            # ファイル保存処理（HF Spacesでは無効化）
-            edited_path = None
-            matte_path = None
-            rgba_path = None
-            json_path = None
-
-            if not self.app.output_manager.disable_save:
-                output_dir = Path("output")
-                output_dir.mkdir(exist_ok=True)
-
-                # 編集画像を保存（オプション）
-                if save_edited_image:
-                    edited_path = output_dir / f"{base_filename}_edited.png"
-                    with open(edited_path, "wb") as f:
-                        f.write(edited_img_data)
-
-                # アルファマット保存
-                matte_path = output_dir / f"{base_filename}_matte.png"
-                with open(matte_path, "wb") as f:
-                    f.write(alpha_matte_data)
-
-                # RGBA画像保存
-                rgba_path = output_dir / f"{base_filename}_rgba.png"
-                with open(rgba_path, "wb") as f:
-                    f.write(rgba_bytes)
-
-                # メタデータ保存
-                metadata = {
-                    "timestamp": datetime.now().isoformat(),
-                    "input_resolution": {"width": input_w, "height": input_h},
-                    "target_resolution": {"width": target_w, "height": target_h},
-                    "edited_resolution": {"width": edited_w, "height": edited_h},
-                    "edit_type": edit_type,
-                    "generation": {
-                        "model": model_name,
-                        "aspect_ratio": aspect_ratio,
-                        "resolution": resolution,
-                        "lighting_enabled": lighting_enabled,
-                        "alpha_prompt_choice": alpha_prompt_choice,
-                        "edited_image_path": str(edited_path) if edited_path else None,
-                        "alpha_matte_path": str(matte_path) if matte_path else None,
-                        "rgba_output_path": str(rgba_path) if rgba_path else None,
-                        "rgba_size_bytes": len(rgba_bytes),
-                    },
-                }
-
-                # メタデータJSONを保存
-                json_path = output_dir / f"{base_filename}.json"
-                with open(json_path, "w", encoding="utf-8") as f:
-                    json.dump(metadata, f, ensure_ascii=False, indent=2)
-
-            # 12. 生成情報テキスト
-            if self.app.output_manager.disable_save:
-                file_info = "- ファイル保存無効（クラウドデプロイモード）"
+            # プロンプト最適化（pre_optimized_promptが無い場合のみ）
+            if optimization_level > 0:
+                try:
+                    optimizer = PromptOptimizer(self.app.google_api_key)
+                    optimized_prompt, opt_error = optimizer.optimize(
+                        edit_prompt, prompt_text, optimization_level
+                    )
+                    if opt_error:
+                        logger.warning(f"Prompt optimization warning: {opt_error}")
+                        optimized_prompt_error = opt_error
+                    edit_prompt = optimized_prompt
+                    logger.info(f"Prompt optimized (level {optimization_level})")
+                except Exception as e:
+                    logger.error(f"Prompt optimization failed: {e}", exc_info=True)
+                    optimized_prompt_error = f"最適化エラー: {str(e)}"
+                    # フォールバック: 追加指示を単純結合
+                    if prompt_text and prompt_text.strip():
+                        edit_prompt += f"\n\nAdditional instructions: {prompt_text.strip()}"
             else:
-                file_info = f"""- 編集後RGB: {edited_path if edited_path else "(保存なし)"}
+                # レベル0: 追加指示があれば単純結合
+                if prompt_text and prompt_text.strip():
+                    edit_prompt += f"\n\nAdditional instructions: {prompt_text.strip()}"
+
+        # 入力画像をバイナリ化
+        img_buffer = BytesIO()
+        input_image.save(img_buffer, format="PNG")
+        img_bytes = img_buffer.getvalue()
+
+        # Geminiチャット作成
+        client = genai.Client(api_key=self.app.google_api_key, vertexai=False)
+
+        chat = client.chats.create(
+            model=model_name,
+            config=types.GenerateContentConfig(
+                response_modalities=["TEXT", "IMAGE"],
+                image_config=types.ImageConfig(
+                    aspect_ratio=aspect_ratio, image_size=resolution
+                ),
+            ),
+        )
+
+        # 1ターン目: 画像編集
+        logger.info(f"Sending turn 1: Image editing (type: {edit_type})")
+        response_1 = chat.send_message(
+            [
+                edit_prompt,
+                types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
+            ]
+        )
+
+        # 編集画像を取得
+        edited_img_data = None
+        for part in response_1.parts:
+            if part.text is not None:
+                logger.info(f"API response (turn 1): {part.text}")
+            elif hasattr(part, "inline_data") and part.inline_data:
+                data_field = part.inline_data.data
+                if isinstance(data_field, str):
+                    edited_img_data = base64.b64decode(data_field)
+                else:
+                    edited_img_data = data_field
+
+        if edited_img_data is None:
+            return None, None, None, (input_w, input_h), (target_w, target_h), edit_type, optimized_prompt_error
+
+        # 編集画像をPIL Imageに変換
+        edited_img = Image.open(BytesIO(edited_img_data))
+        edited_w, edited_h = edited_img.size
+        logger.info(f"Edited image size: {edited_w}x{edited_h}")
+
+        # 処理3の場合はアルファマット生成をスキップ
+        if process_num == 3:
+            # アップスケールのみ：アルファマットなし
+            logger.info("Process 3: Skipping alpha matte generation (upscale only)")
+            return (
+                (edited_img, edited_img_data, edited_w, edited_h),
+                None,
+                None,
+                (input_w, input_h),
+                (target_w, target_h),
+                edit_type,
+                optimized_prompt_error,
+            )
+
+        # 2ターン目: アルファマット生成（処理1,2のみ）
+        alpha_prompt = self.ALPHA_MATTE_PROMPTS[alpha_prompt_choice]
+        logger.info("Sending turn 2: Alpha matte generation")
+        response_2 = chat.send_message(alpha_prompt)
+
+        # アルファマット画像を取得
+        alpha_matte_data = None
+        for part in response_2.parts:
+            if part.text is not None:
+                logger.info(f"API response (turn 2): {part.text}")
+            elif hasattr(part, "inline_data") and part.inline_data:
+                data_field = part.inline_data.data
+                if isinstance(data_field, str):
+                    alpha_matte_data = base64.b64decode(data_field)
+                else:
+                    alpha_matte_data = data_field
+
+        if alpha_matte_data is None:
+            return (
+                (edited_img, edited_img_data, edited_w, edited_h),
+                None,
+                None,
+                (input_w, input_h),
+                (target_w, target_h),
+                edit_type,
+                optimized_prompt_error,
+            )
+
+        # アルファマット画像をPIL Imageに変換（表示用）
+        alpha_matte_img = Image.open(BytesIO(alpha_matte_data))
+
+        # RGBA合成（ローカル処理）
+        rgba_bytes = self.compose_alpha_channel(edited_img, alpha_matte_data)
+        rgba_img = Image.open(BytesIO(rgba_bytes))
+
+        return (
+            (edited_img, edited_img_data, edited_w, edited_h),
+            (alpha_matte_img, alpha_matte_data),
+            (rgba_img, rgba_bytes),
+            (input_w, input_h),
+            (target_w, target_h),
+            edit_type,
+            optimized_prompt_error,
+        )
+
+    def _save_outputs(
+        self,
+        edited_img_data: bytes,
+        alpha_matte_data: bytes,
+        rgba_bytes: bytes,
+        save_edited_image: bool,
+    ) -> tuple[Optional[Path], Optional[Path], Optional[Path], Optional[Path]]:
+        """
+        ファイル保存処理
+
+        Returns:
+            (edited_path, matte_path, rgba_path, json_path)
+        """
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        import random
+        import string
+
+        unique_id = "".join(
+            random.choices(string.ascii_lowercase + string.digits, k=6)
+        )
+        base_filename = f"alpha_matte_{timestamp}_{unique_id}"
+
+        # ファイル保存処理（HF Spacesでは無効化）
+        edited_path = None
+        matte_path = None
+        rgba_path = None
+        json_path = None
+
+        if not self.app.output_manager.disable_save:
+            output_dir = Path("output")
+            output_dir.mkdir(exist_ok=True)
+
+            # 編集画像を保存（オプション）
+            if save_edited_image:
+                edited_path = output_dir / f"{base_filename}_edited.png"
+                with open(edited_path, "wb") as f:
+                    f.write(edited_img_data)
+
+            # アルファマット保存
+            matte_path = output_dir / f"{base_filename}_matte.png"
+            with open(matte_path, "wb") as f:
+                f.write(alpha_matte_data)
+
+            # RGBA画像保存
+            rgba_path = output_dir / f"{base_filename}_rgba.png"
+            with open(rgba_path, "wb") as f:
+                f.write(rgba_bytes)
+
+            # メタデータは _build_response で生成されるので、ここではパスだけ返す
+            json_path = output_dir / f"{base_filename}.json"
+
+        return edited_path, matte_path, rgba_path, json_path
+
+    def _build_response(
+        self,
+        model_name: str,
+        aspect_ratio: str,
+        resolution: str,
+        lighting_enabled: bool,
+        alpha_prompt_choice: str,
+        edited_w: int,
+        edited_h: int,
+        input_w: int,
+        input_h: int,
+        target_w: int,
+        target_h: int,
+        edit_type: str,
+        rgba_bytes: bytes,
+        edited_path: Optional[Path],
+        matte_path: Optional[Path],
+        rgba_path: Optional[Path],
+        json_path: Optional[Path],
+    ) -> tuple[str, str]:
+        """
+        レスポンステキストとJSONログを構築
+
+        Returns:
+            (info_text, json_log)
+        """
+        # 生成情報テキスト
+        if self.app.output_manager.disable_save:
+            file_info = "- ファイル保存無効（クラウドデプロイモード）"
+        else:
+            file_info = f"""- 編集後RGB: {edited_path if edited_path else "(保存なし)"}
 - アルファマット: {matte_path}
 - RGBA合成: {rgba_path}
 - メタデータ: {json_path}"""
 
-            info_text = f"""### 処理完了 ✅
+        info_text = f"""### 処理完了 ✅
 
 **モデル**: {model_name}
 **編集タイプ**: {edit_type}
@@ -607,30 +431,423 @@ class BasicEditTab(BaseTab):
 {file_info}
 """
 
-            # 13. JSONログ（メタデータ構築）
-            metadata_for_display = {
-                "timestamp": datetime.now().isoformat(),
-                "input_resolution": {"width": input_w, "height": input_h},
-                "target_resolution": {"width": target_w, "height": target_h},
-                "edited_resolution": {"width": edited_w, "height": edited_h},
-                "edit_type": edit_type,
-                "generation": {
-                    "model": model_name,
-                    "aspect_ratio": aspect_ratio,
-                    "resolution": resolution,
-                    "lighting_enabled": lighting_enabled,
-                    "alpha_prompt_choice": alpha_prompt_choice,
-                    "file_save_enabled": not self.app.output_manager.disable_save,
-                },
-            }
-            json_log = json.dumps(metadata_for_display, ensure_ascii=False, indent=2)
+        # JSONログ（メタデータ構築）
+        metadata = {
+            "timestamp": datetime.now().isoformat(),
+            "input_resolution": {"width": input_w, "height": input_h},
+            "target_resolution": {"width": target_w, "height": target_h},
+            "edited_resolution": {"width": edited_w, "height": edited_h},
+            "edit_type": edit_type,
+            "generation": {
+                "model": model_name,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "lighting_enabled": lighting_enabled,
+                "alpha_prompt_choice": alpha_prompt_choice,
+                "file_save_enabled": not self.app.output_manager.disable_save,
+            },
+        }
 
-            return edited_img, alpha_matte_img, rgba_img, info_text, json_log
+        # メタデータJSONファイルを保存
+        if json_path is not None and not self.app.output_manager.disable_save:
+            metadata_for_file = metadata.copy()
+            metadata_for_file["generation"]["edited_image_path"] = (
+                str(edited_path) if edited_path else None
+            )
+            metadata_for_file["generation"]["alpha_matte_path"] = (
+                str(matte_path) if matte_path else None
+            )
+            metadata_for_file["generation"]["rgba_output_path"] = (
+                str(rgba_path) if rgba_path else None
+            )
+            metadata_for_file["generation"]["rgba_size_bytes"] = len(rgba_bytes)
+
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump(metadata_for_file, f, ensure_ascii=False, indent=2)
+
+        json_log = json.dumps(metadata, ensure_ascii=False, indent=2)
+        return info_text, json_log
+
+    def _get_process_type_number(self, process_type: str) -> int:
+        """処理タイプ文字列から番号を抽出"""
+        if "処理1" in process_type:
+            return 1
+        elif "処理2" in process_type:
+            return 2
+        elif "処理3" in process_type:
+            return 3
+        elif "処理4" in process_type:
+            return 4
+        else:
+            return 1  # デフォルト
+
+    def generate_optimized_prompt(
+        self,
+        prompt_text: str,
+        optimization_level: int,
+    ) -> str:
+        """
+        プロンプトのみを生成（画像生成なし）
+
+        プレビュー専用メソッド。最適化されたプロンプトを生成して返す。
+
+        Args:
+            prompt_text: ユーザーの追加指示
+            optimization_level: プロンプト最適化レベル（0/1/2）
+
+        Returns:
+            最適化されたプロンプト文字列
+        """
+        # 基本プロンプトはUPSCALE_ONLY_PROMPTのみ
+        edit_prompt = UPSCALE_ONLY_PROMPT
+
+        # プロンプト最適化（レベル0でも整合性チェックを実行）
+        try:
+            optimizer = PromptOptimizer(self.app.google_api_key)
+
+            if optimization_level == 0:
+                # レベル0: 整合性チェックのみ
+                optimized_prompt, _ = optimizer._level_0_consistency_check(
+                    edit_prompt, prompt_text
+                )
+            else:
+                # レベル1,2: Gemini 3.0 最適化
+                optimized_prompt, opt_error = optimizer.optimize(
+                    edit_prompt, prompt_text, optimization_level
+                )
+                if opt_error:
+                    return f"⚠️ 最適化エラー: {opt_error}\n\nフォールバックプロンプト:\n{optimized_prompt}"
+
+            return optimized_prompt
+
+        except Exception as e:
+            logger.error(f"Prompt optimization failed: {e}", exc_info=True)
+            # フォールバック: 整合性チェックのみ
+            try:
+                optimizer = PromptOptimizer(self.app.google_api_key)
+                fallback_prompt, _ = optimizer._level_0_consistency_check(
+                    edit_prompt, prompt_text
+                )
+                return f"⚠️ 最適化エラー: {str(e)}\n\nフォールバックプロンプト:\n{fallback_prompt}"
+            except:
+                return f"⚠️ エラー: {str(e)}\n\n基本プロンプト:\n{edit_prompt}"
+
+    def simple_upscale(
+        self,
+        model_name: str,
+        input_image: Optional[Image.Image],
+        prompt_text: str,
+        optimization_level: int,
+        optimized_prompt_from_ui: str,
+        aspect_ratio: str,
+        resolution: str,
+    ) -> tuple[Optional[Image.Image], str, str]:
+        """
+        シンプルなアップスケール処理（1回のAPI呼び出しのみ）
+
+        Args:
+            model_name: Geminiモデル名
+            input_image: 入力画像
+            prompt_text: ユーザーの追加指示
+            optimization_level: プロンプト最適化レベル（0/1/2）
+            optimized_prompt_from_ui: UI経由で既に最適化されたプロンプト（空文字列なら新規生成）
+            aspect_ratio: アスペクト比
+            resolution: 解像度
+
+        Returns:
+            (output_image, output_info, optimized_prompt)
+        """
+        optimized_prompt_info = ""
+
+        # 1. 入力検証
+        error_result = self._validate_inputs(input_image)
+        if error_result:
+            return error_result
+
+        try:
+            # 2. 目標解像度を計算
+            target_w, target_h = self.calculate_target_resolution(aspect_ratio, resolution)
+
+            # 3. プロンプト最適化（UI経由で既に最適化済みの場合はスキップ）
+            if optimized_prompt_from_ui and optimized_prompt_from_ui.strip():
+                final_prompt = optimized_prompt_from_ui
+                logger.info("Using pre-optimized prompt from UI")
+            else:
+                optimizer = PromptOptimizer(self.app.google_api_key)
+                final_prompt, opt_error = optimizer.optimize(
+                    UPSCALE_ONLY_PROMPT, prompt_text, optimization_level
+                )
+                if opt_error:
+                    optimized_prompt_info = f"⚠️ プロンプト最適化エラー: {opt_error}"
+                    logger.warning(optimized_prompt_info)
+
+            # 4. 入力画像をRGBに変換
+            if input_image.mode == "RGBA":
+                background = Image.new("RGB", input_image.size, (255, 255, 255))
+                background.paste(input_image, mask=input_image.split()[3])
+                input_image = background
+            elif input_image.mode != "RGB":
+                input_image = input_image.convert("RGB")
+
+            input_w, input_h = input_image.size
+
+            # 5. 画像をバイナリに変換
+            img_buffer = BytesIO()
+            input_image.save(img_buffer, format="PNG")
+            img_bytes = img_buffer.getvalue()
+
+            # 6. Gemini API呼び出し
+            response = self.app.gemini_generator.generate_content(
+                model=model_name,
+                contents=[
+                    types.Part.from_bytes(
+                        data=img_bytes, mime_type="image/png"
+                    ),
+                    types.Part.from_text(text=final_prompt),
+                ],
+                config=types.GenerateContentConfig(
+                    response_modalities=["image"],
+                    image_generation_config=types.ImageGenerationConfig(
+                        aspect_ratio=aspect_ratio,
+                        output_resolution=resolution,
+                    ),
+                ),
+            )
+
+            # 7. 出力画像を取得
+            output_img_data = None
+            for part in response.candidates[0].content.parts:
+                if part.inline_data:
+                    output_img_data = base64.b64decode(part.inline_data.data)
+                    break
+
+            if not output_img_data:
+                return None, "❌ エラー: 画像生成に失敗しました", final_prompt
+
+            output_img = Image.open(BytesIO(output_img_data))
+            output_w, output_h = output_img.size
+
+            # 8. ファイル保存
+            output_path = None
+            if not self.app.output_manager.disable_save:
+                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                unique_id = "".join(
+                    random.choices(string.ascii_lowercase + string.digits, k=6)
+                )
+                output_dir = Path("output")
+                output_dir.mkdir(exist_ok=True)
+                output_path = output_dir / f"upscale_{timestamp}_{unique_id}.png"
+                with open(output_path, "wb") as f:
+                    f.write(output_img_data)
+
+            # 9. レスポンス構築
+            info_text = f"""### 処理完了 ✅
+
+**モデル**: {model_name}
+**処理タイプ**: 生成アップスケール
+**入力解像度**: {input_w} x {input_h}
+**出力解像度**: {output_w} x {output_h} ({resolution})
+**アスペクト比**: {aspect_ratio}
+{f"**プロンプト最適化**: レベル{optimization_level}" if optimization_level > 0 else ""}
+{f"**⚠️ 最適化警告**: {optimized_prompt_info}" if optimized_prompt_info else ""}
+
+**出力ファイル**:
+- アップスケール画像: {output_path if output_path else "（ファイル保存無効）"}
+"""
+
+            return output_img, info_text, final_prompt
+
+        except Exception as e:
+            logger.error(f"Upscale failed: {e}", exc_info=True)
+            error_text = f"❌ エラー: {str(e)}"
+            return None, error_text, ""
+
+    def edit_with_alpha_matte(
+        self,
+        process_type: str,
+        model_name: str,
+        input_image: Optional[Image.Image],
+        prompt_text: str,
+        optimization_level: int,
+        optimized_prompt_from_ui: str,  # NEW PARAMETER
+        aspect_ratio: str,
+        resolution: str,
+        lighting_enabled: bool,
+        alpha_prompt_choice: str,
+        save_edited_image: bool,
+    ) -> tuple[
+        Optional[Image.Image], Optional[Image.Image], Optional[Image.Image], str, str
+    ]:
+        """
+        マルチターン編集 + RGBA合成（2段階実行対応）
+
+        2つのモードをサポート:
+        1. プロンプト生成のみ（optimized_prompt_from_ui が空）
+        2. 画像生成実行（optimized_prompt_from_ui に値がある）
+
+        Args:
+            process_type: 処理タイプ（"処理1: ...", "処理2: ...", etc.）
+            optimization_level: プロンプト最適化レベル（0/1/2）
+            optimized_prompt_from_ui: UIから渡された最適化済みプロンプト
+
+        Returns:
+            (output_img1, output_img2, output_img3, info_text, json_log)
+        """
+        # 0. プロンプト生成のみモード（画像生成なし）
+        if not optimized_prompt_from_ui or optimized_prompt_from_ui.strip() == "":
+            # 入力検証（画像は不要）
+            optimized_prompt = self.generate_optimized_prompt(
+                process_type,
+                prompt_text,
+                optimization_level,
+                lighting_enabled,
+                alpha_prompt_choice,
+            )
+            # 画像生成せず、プロンプトのみを返す
+            return (
+                None,  # edited_image
+                None,  # alpha_matte
+                None,  # rgba_image
+                "✅ プロンプトを生成しました。内容を確認して「編集開始」をクリックしてください。",  # info_text
+                optimized_prompt,  # json_log → optimized_prompt display
+            )
+
+        # 1. 入力検証（画像生成モードの場合）
+        validation_error = self._validate_inputs(input_image)
+        if validation_error is not None:
+            return validation_error
+
+        # 処理タイプ番号を取得
+        process_num = self._get_process_type_number(process_type)
+
+        # 処理4は未実装
+        if process_num == 4:
+            return (
+                None,
+                None,
+                None,
+                "❌ 処理4（色温度調整）は現在未実装です。他の処理タイプを選択してください。",
+                "",
+            )
+
+        try:
+            # 2. マルチターン編集実行（最適化済みプロンプトを使用）
+            (
+                edited_result,
+                alpha_result,
+                rgba_result,
+                input_size,
+                target_size,
+                edit_type,
+                optimized_prompt_info,
+            ) = self._execute_multi_turn_edit(
+                input_image,
+                model_name,
+                "",  # prompt_text: 空文字列（既に最適化済み）
+                0,  # optimization_level: 0（最適化スキップ）
+                process_num,
+                aspect_ratio,
+                resolution,
+                lighting_enabled,
+                alpha_prompt_choice,
+                pre_optimized_prompt=optimized_prompt_from_ui,  # NEW PARAMETER
+            )
+
+            # 3. エラーチェック
+            if edited_result is None:
+                return None, None, None, "エラー: 編集画像を取得できませんでした", optimized_prompt_from_ui
+
+            # 処理3の場合はアルファマットなしが正常
+            if alpha_result is None and process_num != 3:
+                edited_img, _, _, _ = edited_result
+                return (
+                    edited_img,
+                    None,
+                    None,
+                    "エラー: アルファマット画像を取得できませんでした",
+                    optimized_prompt_from_ui,
+                )
+
+            # 4. 結果の展開
+            edited_img, edited_img_data, edited_w, edited_h = edited_result
+            input_w, input_h = input_size
+            target_w, target_h = target_size
+
+            # 処理3（アップスケールのみ）の場合は簡易処理
+            if process_num == 3:
+                # アルファマットなし：edited_imgのみ保存
+                if not self.app.output_manager.disable_save:
+                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+                    import random
+                    import string
+                    unique_id = "".join(
+                        random.choices(string.ascii_lowercase + string.digits, k=6)
+                    )
+                    output_dir = Path("output")
+                    output_dir.mkdir(exist_ok=True)
+                    edited_path = output_dir / f"upscale_{timestamp}_{unique_id}.png"
+                    with open(edited_path, "wb") as f:
+                        f.write(edited_img_data)
+
+                    info_text = f"""### 処理完了 ✅
+
+**モデル**: {model_name}
+**処理タイプ**: 処理3（生成アップスケール）
+**解像度**: {edited_w} x {edited_h} ({resolution})
+**アスペクト比**: {aspect_ratio}
+{f"**プロンプト最適化**: レベル{optimization_level}" if optimization_level > 0 else ""}
+{f"**⚠️ 最適化警告**: {optimized_prompt_info}" if optimized_prompt_info else ""}
+
+**出力ファイル**:
+- アップスケール画像: {edited_path}
+"""
+                else:
+                    info_text = f"""### 処理完了 ✅
+
+**モデル**: {model_name}
+**処理タイプ**: 処理3（生成アップスケール）
+**解像度**: {edited_w} x {edited_h} ({resolution})
+**ファイル保存**: 無効（クラウドデプロイモード）
+"""
+
+                return edited_img, None, None, info_text, optimized_prompt_from_ui
+
+            # 処理1,2の場合：アルファマット処理
+            alpha_matte_img, alpha_matte_data = alpha_result
+            rgba_img, rgba_bytes = rgba_result
+
+            # 5. ファイル保存
+            edited_path, matte_path, rgba_path, json_path = self._save_outputs(
+                edited_img_data, alpha_matte_data, rgba_bytes, save_edited_image
+            )
+
+            # 6. レスポンス構築
+            info_text, json_log = self._build_response(
+                model_name,
+                aspect_ratio,
+                resolution,
+                lighting_enabled,
+                alpha_prompt_choice,
+                edited_w,
+                edited_h,
+                input_w,
+                input_h,
+                target_w,
+                target_h,
+                edit_type,
+                rgba_bytes,
+                edited_path,
+                matte_path,
+                rgba_path,
+                json_path,
+            )
+
+            return edited_img, alpha_matte_img, rgba_img, info_text, optimized_prompt_from_ui
 
         except Exception as e:
             logger.error(f"Alpha matte generation failed: {e}", exc_info=True)
             error_text = f"❌ エラー: {str(e)}"
-            return None, None, None, error_text, ""
+            return None, None, None, error_text, optimized_prompt_from_ui
 
     def create_ui(self) -> None:
         """ベーシック編集タブのUIを作成"""
@@ -642,32 +859,32 @@ class BasicEditTab(BaseTab):
             gr.Markdown("""
             # ベーシック編集
 
-            人物のアルファチャンネル切り抜き（背景除去）機能を提供します。
+            シンプルな1回編集に特化したタブ。入力画像を指定解像度にアップスケールします。
 
             **処理フロー**:
-            1. 入力画像を指定解像度にアップスケール + 明瞭度向上
-            2. グレースケールアルファマットを生成
-            3. RGBA画像として合成・保存
+            1. 入力画像を読み込み
+            2. プロンプト最適化（アップスケール + ユーザー追加指示）
+            3. Gemini API呼び出し（1回のみ）
+            4. 出力画像を保存・表示
             """)
 
             with gr.Row():
                 # 左カラム: 入力エリア
                 with gr.Column(scale=1):
-                    # 処理選択
-                    process_type = gr.Dropdown(
-                        label="処理選択",
-                        choices=["人物のアルファチャンネル切り抜き（背景除去）"],
-                        value="人物のアルファチャンネル切り抜き（背景除去）",
-                        info="現在は1種類のみ（将来拡張予定）",
-                    )
-
                     # モデル選択
+                    # デフォルトモデルを選択（gemini-3-pro-image-preview を優先）
+                    default_model = "gemini-3-pro-image-preview"
+                    if default_model in self.app.gemini_models:
+                        model_default_value = default_model
+                    elif len(self.app.gemini_models) > 1:
+                        model_default_value = self.app.gemini_models[1]
+                    else:
+                        model_default_value = self.app.gemini_models[0]
+
                     model_name = gr.Dropdown(
                         label="モデル",
                         choices=self.app.gemini_models,
-                        value=self.app.gemini_models[1]
-                        if len(self.app.gemini_models) > 1
-                        else self.app.gemini_models[0],
+                        value=model_default_value,
                         info="Gemini画像生成モデル",
                     )
 
@@ -683,6 +900,27 @@ class BasicEditTab(BaseTab):
                         label="追加指示（オプション）",
                         placeholder="例: 髪の毛の細かい部分を重視してください",
                         lines=3,
+                    )
+
+                    # 最適化されたプロンプト表示 (NEW)
+                    optimized_prompt_display = gr.Textbox(
+                        label="最適化されたプロンプト",
+                        placeholder="「プロンプト生成」または「編集開始」をクリックすると、最適化されたプロンプトが表示されます",
+                        lines=5,
+                        interactive=True,
+                        info="生成前にプロンプトを確認・編集できます",
+                    )
+
+                    # プロンプト最適化レベル
+                    optimization_level = gr.Radio(
+                        label="プロンプト最適化レベル",
+                        choices=[
+                            ("レベル0: 最適化なし（整合性チェックのみ）", 0),
+                            ("レベル1: Gemini 3.0 自動最適化（推奨）", 1),
+                            ("レベル2: Gemini 3.0 誇張表現追加", 2),
+                        ],
+                        value=1,
+                        info="Gemini 3.0でプロンプトを最適化します",
                     )
 
                     # アスペクト比
@@ -712,98 +950,65 @@ class BasicEditTab(BaseTab):
                         info="出力画像の解像度",
                     )
 
-                    # 詳細設定
-                    with gr.Accordion("詳細設定", open=True):
-                        lighting_enabled = gr.Checkbox(
-                            label="ライティング調整を有効化",
-                            value=True,
-                            info="背景をグレーに置き換え、フラットな照明を適用",
-                        )
-
-                        alpha_prompt_choice = gr.Dropdown(
-                            label="アルファマット生成方式",
-                            choices=list(self.ALPHA_MATTE_PROMPTS.keys()),
-                            value="人物用（実写）- 推奨",
-                            info="アルファマット生成のプロンプト選択",
-                        )
-
-                        save_edited_image = gr.Checkbox(
-                            label="編集画像（RGB）を保存",
-                            value=True,
-                            info="中間生成物のRGB画像をファイルに保存",
-                        )
-
                     # ボタン
                     with gr.Row():
                         edit_button = gr.Button("編集開始", variant="primary")
+                        generate_prompt_button = gr.Button("プロンプト生成", variant="secondary", size="sm")  # NEW
                         reset_button = gr.Button("リセット")
 
                 # 右カラム: 出力エリア
                 with gr.Column(scale=1):
-                    output_img1 = gr.Image(label="出力画像1: 編集後RGB画像", type="pil")
-                    output_img2 = gr.Image(
-                        label="出力画像2: アルファマット（グレースケール）", type="pil"
-                    )
-                    output_img3 = gr.Image(
-                        label="出力画像3: RGBA合成画像（最終出力）", type="pil"
-                    )
-
+                    output_img = gr.Image(label="出力画像（アップスケール後）", type="pil")
                     output_info = gr.Markdown(label="生成情報")
 
-                    with gr.Accordion("JSONログ", open=False):
-                        output_json = gr.Code(language="json", label="メタデータ")
-
             # イベントハンドラ
-            edit_button.click(
-                fn=self.edit_with_alpha_matte,
+            # プロンプト生成ボタン
+            generate_prompt_button.click(
+                fn=self.generate_optimized_prompt,
                 inputs=[
-                    process_type,
+                    prompt_text,
+                    optimization_level,
+                ],
+                outputs=[optimized_prompt_display],
+            )
+
+            # 編集開始ボタン
+            edit_button.click(
+                fn=self.simple_upscale,
+                inputs=[
                     model_name,
                     input_image,
                     prompt_text,
+                    optimization_level,
+                    optimized_prompt_display,
                     aspect_ratio,
                     resolution,
-                    lighting_enabled,
-                    alpha_prompt_choice,
-                    save_edited_image,
                 ],
                 outputs=[
-                    output_img1,
-                    output_img2,
-                    output_img3,
+                    output_img,
                     output_info,
-                    output_json,
+                    optimized_prompt_display,
                 ],
             )
 
             reset_button.click(
                 fn=lambda: (
-                    None,
-                    "",
-                    "1:1",
-                    "1K",
-                    True,
-                    "人物用（実写）- 推奨",
-                    True,
-                    None,
-                    None,
-                    None,
-                    "",
-                    "",
+                    None,  # input_image
+                    "",  # prompt_text
+                    "",  # optimized_prompt_display
+                    "1:1",  # aspect_ratio
+                    "1K",  # resolution
+                    None,  # output_img
+                    "",  # output_info
                 ),
                 inputs=[],
                 outputs=[
                     input_image,
                     prompt_text,
+                    optimized_prompt_display,
                     aspect_ratio,
                     resolution,
-                    lighting_enabled,
-                    alpha_prompt_choice,
-                    save_edited_image,
-                    output_img1,
-                    output_img2,
-                    output_img3,
+                    output_img,
                     output_info,
-                    output_json,
                 ],
             )

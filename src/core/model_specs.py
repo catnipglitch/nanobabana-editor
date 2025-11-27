@@ -10,6 +10,29 @@ from typing import List, Dict, Optional
 from dataclasses import dataclass
 
 
+# ===================================================================
+# モデルID定数定義 (Constants)
+# ===================================================================
+
+# Gemini Models
+MODEL_ID_GEMINI_2_5_FLASH_IMAGE = "gemini-2.5-flash-image"
+MODEL_ID_GEMINI_3_PRO_IMAGE_PREVIEW = "gemini-3-pro-image-preview"
+
+# Imagen 4.0 Models
+MODEL_ID_IMAGEN_4_0_GENERATE_001 = "imagen-4.0-generate-001"
+MODEL_ID_IMAGEN_4_0_FAST_GENERATE_001 = "imagen-4.0-fast-generate-001"
+MODEL_ID_IMAGEN_4_0_ULTRA_GENERATE_001 = "imagen-4.0-ultra-generate-001"
+
+# Imagen 3.0 Models
+MODEL_ID_IMAGEN_3_0_GENERATE_002 = "imagen-3.0-generate-002"
+MODEL_ID_IMAGEN_3_0_GENERATE_001 = "imagen-3.0-generate-001"
+MODEL_ID_IMAGEN_3_0_FAST_GENERATE_001 = "imagen-3.0-fast-generate-001"
+MODEL_ID_IMAGEN_3_0_CAPABILITY_001 = "imagen-3.0-capability-001"
+
+# Test Models
+MODEL_ID_TEST = "test-model"
+
+
 class ModelType(Enum):
     """画像生成モデルのタイプ"""
     IMAGEN = "imagen"
@@ -101,7 +124,7 @@ GEMINI_3_PRO_ASPECT_RATIOS = [
 
 # Imagen 4.0 系モデル
 IMAGEN_4_0_GENERATE_001 = ModelSpec(
-    model_id="imagen-4.0-generate-001",
+    model_id=MODEL_ID_IMAGEN_4_0_GENERATE_001,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 4.0 (Standard)",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -123,7 +146,7 @@ IMAGEN_4_0_GENERATE_001 = ModelSpec(
 )
 
 IMAGEN_4_0_FAST_GENERATE_001 = ModelSpec(
-    model_id="imagen-4.0-fast-generate-001",
+    model_id=MODEL_ID_IMAGEN_4_0_FAST_GENERATE_001,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 4.0 Fast",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -138,7 +161,7 @@ IMAGEN_4_0_FAST_GENERATE_001 = ModelSpec(
 )
 
 IMAGEN_4_0_ULTRA_GENERATE_001 = ModelSpec(
-    model_id="imagen-4.0-ultra-generate-001",
+    model_id=MODEL_ID_IMAGEN_4_0_ULTRA_GENERATE_001,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 4.0 Ultra",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -154,7 +177,7 @@ IMAGEN_4_0_ULTRA_GENERATE_001 = ModelSpec(
 
 # Imagen 3.0 系モデル
 IMAGEN_3_0_GENERATE_002 = ModelSpec(
-    model_id="imagen-3.0-generate-002",
+    model_id=MODEL_ID_IMAGEN_3_0_GENERATE_002,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 3.0 (v2)",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -169,7 +192,7 @@ IMAGEN_3_0_GENERATE_002 = ModelSpec(
 )
 
 IMAGEN_3_0_GENERATE_001 = ModelSpec(
-    model_id="imagen-3.0-generate-001",
+    model_id=MODEL_ID_IMAGEN_3_0_GENERATE_001,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 3.0 (v1)",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -184,7 +207,7 @@ IMAGEN_3_0_GENERATE_001 = ModelSpec(
 )
 
 IMAGEN_3_0_FAST_GENERATE_001 = ModelSpec(
-    model_id="imagen-3.0-fast-generate-001",
+    model_id=MODEL_ID_IMAGEN_3_0_FAST_GENERATE_001,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 3.0 Fast",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -199,7 +222,7 @@ IMAGEN_3_0_FAST_GENERATE_001 = ModelSpec(
 )
 
 IMAGEN_3_0_CAPABILITY_001 = ModelSpec(
-    model_id="imagen-3.0-capability-001",
+    model_id=MODEL_ID_IMAGEN_3_0_CAPABILITY_001,
     model_type=ModelType.IMAGEN,
     display_name="Imagen 3.0 Capability",
     auth_methods=[AuthMethod.VERTEX_AI_API_KEY, AuthMethod.GCP_PROJECT_ID],
@@ -215,7 +238,7 @@ IMAGEN_3_0_CAPABILITY_001 = ModelSpec(
 
 # Gemini 2.5 Flash Image
 GEMINI_2_5_FLASH_IMAGE = ModelSpec(
-    model_id="gemini-2.5-flash-image",
+    model_id=MODEL_ID_GEMINI_2_5_FLASH_IMAGE,
     model_type=ModelType.GEMINI,
     display_name="Gemini 2.5 Flash Image",
     auth_methods=[AuthMethod.GEMINI_API_KEY],
@@ -231,7 +254,7 @@ GEMINI_2_5_FLASH_IMAGE = ModelSpec(
 
 # Gemini 3 Pro Image Preview
 GEMINI_3_PRO_IMAGE_PREVIEW = ModelSpec(
-    model_id="gemini-3-pro-image-preview",
+    model_id=MODEL_ID_GEMINI_3_PRO_IMAGE_PREVIEW,
     model_type=ModelType.GEMINI,
     display_name="Gemini 3 Pro Image Preview",
     auth_methods=[AuthMethod.GEMINI_API_KEY],
@@ -251,7 +274,7 @@ GEMINI_3_PRO_IMAGE_PREVIEW = ModelSpec(
 
 # テストモデル
 TEST_MODEL = ModelSpec(
-    model_id="test-model",
+    model_id=MODEL_ID_TEST,
     model_type=ModelType.TEST,
     display_name="Test Model (Development)",
     auth_methods=[AuthMethod.NONE],

@@ -198,29 +198,7 @@ python generate_image.py "Test prompt" -m test-model
 - **Gradio**: WebUIフレームワーク
 - **PIL (Pillow)**: 画像処理
 
-## デプロイ
 
-### Hugging Face Spaces
-
-このアプリは Hugging Face Spaces へのデプロイに対応しています。
-
-**デプロイ手順:**
-
-1. Hugging Face にログイン
-2. 新しい Space を作成（SDK: Gradio）
-3. リポジトリをプッシュ
-4. Secrets に `GOOGLE_API_KEY` を設定
-
-**自動対応:**
-- ファイル保存の無効化（`SPACE_ID` 環境変数を検出）
-- Gradioの一時ファイル機構を使用
-- メタデータはUIに直接表示
-
-**手動制御:**
-
-環境変数 `DISABLE_FILE_SAVE=true` を設定することで、任意の環境でファイル保存を無効化できます。
-
-詳細は `.private/docs/TECH_SPEC.md` の「ファイル出力管理とデプロイ対応」セクションを参照してください。
 
 ## ライセンス
 
