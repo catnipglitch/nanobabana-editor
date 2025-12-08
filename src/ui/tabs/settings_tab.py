@@ -91,6 +91,27 @@ class SettingsTab(BaseTab):
                     - `.env` ファイルは `.gitignore` に追加されています
                     """)
 
+            # デモモード
+            with gr.Accordion("デモモード：プロンプト最適化テスト", open=False):
+                gr.Markdown("""
+                ### プロンプト最適化デモ
+
+                用意された複数のサンプルプロンプト×レベルの組み合わせで、プロンプト最適化機能の動作を確認します。
+                結果は `output/` ディレクトリに1つの Markdown ファイルとして保存されます。
+
+                **注意**: APIキーが設定されている必要があります。
+                """)
+
+                demo_run_all_button = gr.Button("全デモ実行", variant="primary", size="sm")
+                demo_result_output = gr.Markdown(label="デモ実行結果", value="")
+
+            # デモボタンのイベントハンドラー
+            demo_run_all_button.click(
+                fn=self.run_all_demos,
+                inputs=[],
+                outputs=[demo_result_output]
+            )
+
             # トークンカウントテストボタン（無料）
             settings_token_test_button.click(
                 fn=self.test_api_token_count,
@@ -109,7 +130,7 @@ class SettingsTab(BaseTab):
             settings_apply_button.click(
                 fn=self.update_api_key,
                 inputs=[settings_api_key_input],
-                outputs=[settings_status]
+                outputs=[settings_status, self.app.warning_banner]
             )
 
     def test_api_token_count(self, api_key: str):
@@ -272,10 +293,10 @@ Free Tier の場合、画像生成APIにはアクセスできません。
             api_key: 新しいAPIキー
 
         Returns:
-            status_message: ステータスメッセージ
+            tuple: (status_message, warning_banner_visibility)
         """
         if not api_key or api_key.strip() == "":
-            return "⚠ APIキーを入力してください"
+            return "⚠ APIキーを入力してください", gr.update(visible=True)
 
         logger.info("Updating API key and reinitializing generators...")
 
@@ -290,9 +311,35 @@ Free Tier の場合、画像生成APIにはアクセスできません。
             self.app.api_key_missing = False
 
             logger.info("API key updated and generators reinitialized successfully")
-            return "✅ APIキーを更新しました。画像生成が可能です。"
+            return "✅ APIキーを更新しました。画像生成が可能です。", gr.update(visible=False)
 
         except Exception as e:
             logger.error(f"Failed to update API key: {e}", exc_info=True)
             self.app.api_key_missing = True
-            return f"❌ APIキーの更新に失敗しました: {str(e)}"
+            return f"❌ APIキーの更新に失敗しました: {str(e)}", gr.update(visible=True)
+
+    def run_all_demos(self):
+        """
+        全デモを一括実行
+
+        Returns:
+            str: デモ実行結果のMarkdown
+        """
+        if not self.app.google_api_key:
+            return "⚠️ APIキーが設定されていません。先にAPIキーを設定してください。"
+
+        logger.info("Running all optimization demos...")
+
+        try:
+            from ...core.prompt_opt_demo import run_all_optimization_demos
+
+            result_text, output_path = run_all_optimization_demos(
+                api_key=self.app.google_api_key
+            )
+
+            logger.info(f"All demos completed: {output_path}")
+            return result_text
+
+        except Exception as e:
+            logger.error(f"Demo execution failed: {e}", exc_info=True)
+            return f"❌ デモ実行エラー: {str(e)}"

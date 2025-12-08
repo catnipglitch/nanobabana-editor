@@ -21,3 +21,18 @@ UPSCALE_ONLY_PROMPT = (
     "Naturally supplement details and output a sharp, clear high-resolution image.  "
     "Minimize artifacts and noise while maintaining professional quality."
 )
+
+# 色温度調整 - 新規追加
+# 参考訳：
+# 入力画像の色温度を最適化し、自然でバランスの取れた色調に調整しなさい。
+# 被写体の肌のトーン、環境光、全体的な雰囲気を考慮すること。
+# 暖色（オレンジ系）または寒色（ブルー系）のバイアスを適切に補正し、
+# プロフェッショナルな品質を維持しながら自然な仕上がりにすること。
+# 画像のシャープネスとディテールはそのまま保持すること。
+COLOR_TEMPERATURE_PROMPT = (
+    "Optimize the color temperature of the input image to achieve a natural and balanced color tone.  "
+    "Consider the subject's skin tone, ambient lighting, and overall atmosphere.  "
+    "Appropriately correct any warm (orange) or cool (blue) bias, "
+    "while maintaining professional quality and a natural finish.  "
+    "Preserve the image's sharpness and detail."
+)

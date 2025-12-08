@@ -2,1034 +2,538 @@
 Basic Edit Tab
 
 ベーシック編集タブ（シンプルな1回編集・アップスケール）
+Tab 2: 入力画像1枚 + プロンプト（テンプレート/最適化）による画像生成
 """
 
 import gradio as gr
 import logging
+import io
 import json
-import base64
-import random
-import string
-from datetime import datetime
+import time
+from dataclasses import dataclass
+from typing import Any, Optional, Tuple
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
-from io import BytesIO
 from PIL import Image
-from google import genai
-from google.genai import types
 
 from .base_tab import BaseTab
+from ...core.generators import GenerationConfig, ModelType
 from ...core.tab_specs import TAB_BASIC_EDIT
 from ...core.prompt_optimizer import PromptOptimizer
-from .prompts.basic_edit_prompts import UPSCALE_ONLY_PROMPT
-
-if TYPE_CHECKING:
-    from ..gradio_app import NanobananaApp
 
 logger = logging.getLogger(__name__)
 
-class BasicEditTab(BaseTab):
-    """ベーシック編集タブ（シンプルな1回編集・アップスケール）"""
 
-    def __init__(self, app: "NanobananaApp"):
-        super().__init__(app)
+@dataclass
+class BasicEditControls:
+    model: Any
+    template: Any
+    prompt: Any
+    optimized_prompt: Any
+    optimization_level: Any
+    optimize_prompt_button: Any
+    input_image: Any  # NEW: Single input image
+    aspect_ratio: Any
+    image_size: Any
+    google_search: Any
+    gen_button_optimize_and_gen: Any
+    gen_button_use_opt: Any
+    gen_button_no_opt: Any
+    reset_button: Any
+    output_image: Any
+    output_info: Any
+    output_json: Any
 
-    @staticmethod
-    def calculate_target_resolution(
-        aspect_ratio: str, resolution: str
-    ) -> tuple[int, int]:
-        """アスペクト比と解像度から目標解像度を計算する"""
-        aspect_map = {
-            "1:1": (1, 1),
-            "2:3": (2, 3),
-            "3:2": (3, 2),
-            "3:4": (3, 4),
-            "4:3": (4, 3),
-            "4:5": (4, 5),
-            "5:4": (5, 4),
-            "9:16": (9, 16),
-            "16:9": (16, 9),
-            "21:9": (21, 9),
-        }
 
-        resolution_base = {"1K": 1024, "2K": 2048, "4K": 4096}
+TEST_MODEL_NAME = "test-model"
+GEMINI_OUTPUT_PREFIX = "gemini_edit"
+DEFAULT_IMAGE_SIZE = "1K"
 
-        w_ratio, h_ratio = aspect_map[aspect_ratio]
-        base = resolution_base[resolution]
-
-        # アスペクト比に応じて解像度を計算
-        if w_ratio >= h_ratio:
-            width = base
-            height = int(base * h_ratio / w_ratio)
-        else:
-            height = base
-            width = int(base * w_ratio / h_ratio)
-
-        return width, height
-
-    @staticmethod
-    def compose_alpha_channel(rgb_img: Image.Image, alpha_bytes: bytes) -> bytes:
-        """
-        RGB画像とアルファマット画像を合成してRGBA PNG画像を生成する
-
-        Args:
-            rgb_img: RGB画像
-            alpha_bytes: アルファマット画像のバイナリデータ
-
-        Returns:
-            RGBA PNG形式のバイナリデータ
-        """
-        # アルファマット画像を読み込み
-        alpha_img = Image.open(BytesIO(alpha_bytes))
-
-        # グレースケールに変換
-        if alpha_img.mode != "L":
-            alpha_img = alpha_img.convert("L")
-
-        # サイズが一致しない場合はリサイズ
-        if rgb_img.size != alpha_img.size:
-            alpha_img = alpha_img.resize(rgb_img.size, Image.Resampling.LANCZOS)
-
-        # RGBA画像を作成
-        rgba_img = rgb_img.convert("RGBA")
-        rgba_img.putalpha(alpha_img)
-
-        # PNG形式でバイナリ出力
-        output_buffer = BytesIO()
-        rgba_img.save(output_buffer, format="PNG")
-        return output_buffer.getvalue()
-
-    def _validate_inputs(
-        self, input_image: Optional[Image.Image]
-    ) -> Optional[tuple[None, None, None, str, str]]:
-        """
-        入力検証（APIキーと入力画像）
-
-        Returns:
-            エラーがある場合はエラーレスポンスタプル、問題なければNone
-        """
-        # 1. 入力検証: APIキー
-        if not self.app.google_api_key or self.app.gemini_generator is None:
-            error_text = """❌ エラー: APIキーが設定されていません
+ERROR_API_KEY_NOT_CONFIGURED = """❌ エラー: APIキーが設定されていません
 
 **Settings タブ** でGoogle API Keyを設定してください。
-
-1. Settings タブを開く
-2. APIキーを入力
-3. 「接続テスト」ボタンで確認
-4. 「APIキーを適用」ボタンで適用
-"""
-            logger.error("API key not configured")
-            return None, None, None, error_text, ""
-
-        # 2. 入力検証: 入力画像
-        if input_image is None:
-            return None, None, None, "⚠ 入力画像をアップロードしてください", ""
-
-        return None
-
-    def _execute_multi_turn_edit(
-        self,
-        input_image: Image.Image,
-        model_name: str,
-        prompt_text: str,
-        optimization_level: int,
-        process_num: int,
-        aspect_ratio: str,
-        resolution: str,
-        lighting_enabled: bool,
-        alpha_prompt_choice: str,
-        pre_optimized_prompt: Optional[str] = None,  # NEW PARAMETER
-    ) -> tuple[
-        Optional[tuple[Image.Image, bytes, int, int]],  # (edited_img, edited_img_data, w, h)
-        Optional[tuple[Image.Image, bytes]],  # (alpha_matte_img, alpha_matte_data)
-        Optional[tuple[Image.Image, bytes]],  # (rgba_img, rgba_bytes)
-        tuple[int, int],  # (input_w, input_h)
-        tuple[int, int],  # (target_w, target_h)
-        str,  # edit_type
-        Optional[str],  # optimized_prompt_info (最適化エラーメッセージ or None)
-    ]:
-        """
-        マルチターン編集を実行（Gemini API呼び出し + RGBA合成）
-
-        Args:
-            process_num: 処理タイプ番号（1/2/3）
-            optimization_level: プロンプト最適化レベル（0/1/2）
-            pre_optimized_prompt: 既に最適化されたプロンプト（UI経由）
-
-        Returns:
-            (edited_result, alpha_result, rgba_result, input_size, target_size, edit_type, optimized_prompt_info)
-            エラー時は各resultがNoneになる可能性あり
-        """
-        # RGB変換（アルファチャンネル削除）
-        if input_image.mode == "RGBA":
-            background = Image.new("RGB", input_image.size, (255, 255, 255))
-            background.paste(input_image, mask=input_image.split()[3])
-            input_image = background
-        elif input_image.mode != "RGB":
-            input_image = input_image.convert("RGB")
-
-        input_w, input_h = input_image.size
-
-        # 目標解像度計算
-        target_w, target_h = self.calculate_target_resolution(aspect_ratio, resolution)
-
-        # プロンプト選択ロジック
-        optimized_prompt_error = None
-
-        if pre_optimized_prompt:
-            # UI経由で既に最適化されたプロンプトが渡された場合
-            edit_prompt = pre_optimized_prompt
-            edit_type = "PRE_OPTIMIZED (UI経由)"
-            logger.info("Using pre-optimized prompt from UI")
-        else:
-            # 処理タイプに応じた基本プロンプト選択
-            if process_num == 1:
-                # 処理1: 従来のロジック（determine_edit_promptを使用）
-                edit_prompt, edit_type = self.determine_edit_prompt(
-                    (input_w, input_h), (target_w, target_h), lighting_enabled
-                )
-            elif process_num == 2:
-                # 処理2: ポーズ変更なしの背景除去
-                edit_prompt = PRESERVE_POSE_PROMPT
-                edit_type = "PRESERVE_POSE (ポーズ維持)"
-            elif process_num == 3:
-                # 処理3: 生成アップスケールのみ
-                edit_prompt = UPSCALE_ONLY_PROMPT
-                edit_type = "UPSCALE_ONLY (アップスケール)"
-            else:
-                # フォールバック（通常ここには来ない）
-                edit_prompt, edit_type = self.determine_edit_prompt(
-                    (input_w, input_h), (target_w, target_h), lighting_enabled
-                )
-
-            # プロンプト最適化（pre_optimized_promptが無い場合のみ）
-            if optimization_level > 0:
-                try:
-                    optimizer = PromptOptimizer(self.app.google_api_key)
-                    optimized_prompt, opt_error = optimizer.optimize(
-                        edit_prompt, prompt_text, optimization_level
-                    )
-                    if opt_error:
-                        logger.warning(f"Prompt optimization warning: {opt_error}")
-                        optimized_prompt_error = opt_error
-                    edit_prompt = optimized_prompt
-                    logger.info(f"Prompt optimized (level {optimization_level})")
-                except Exception as e:
-                    logger.error(f"Prompt optimization failed: {e}", exc_info=True)
-                    optimized_prompt_error = f"最適化エラー: {str(e)}"
-                    # フォールバック: 追加指示を単純結合
-                    if prompt_text and prompt_text.strip():
-                        edit_prompt += f"\n\nAdditional instructions: {prompt_text.strip()}"
-            else:
-                # レベル0: 追加指示があれば単純結合
-                if prompt_text and prompt_text.strip():
-                    edit_prompt += f"\n\nAdditional instructions: {prompt_text.strip()}"
-
-        # 入力画像をバイナリ化
-        img_buffer = BytesIO()
-        input_image.save(img_buffer, format="PNG")
-        img_bytes = img_buffer.getvalue()
-
-        # Geminiチャット作成
-        client = genai.Client(api_key=self.app.google_api_key, vertexai=False)
-
-        chat = client.chats.create(
-            model=model_name,
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio=aspect_ratio, image_size=resolution
-                ),
-            ),
-        )
-
-        # 1ターン目: 画像編集
-        logger.info(f"Sending turn 1: Image editing (type: {edit_type})")
-        response_1 = chat.send_message(
-            [
-                edit_prompt,
-                types.Part.from_bytes(data=img_bytes, mime_type="image/png"),
-            ]
-        )
-
-        # 編集画像を取得
-        edited_img_data = None
-        for part in response_1.parts:
-            if part.text is not None:
-                logger.info(f"API response (turn 1): {part.text}")
-            elif hasattr(part, "inline_data") and part.inline_data:
-                data_field = part.inline_data.data
-                if isinstance(data_field, str):
-                    edited_img_data = base64.b64decode(data_field)
-                else:
-                    edited_img_data = data_field
-
-        if edited_img_data is None:
-            return None, None, None, (input_w, input_h), (target_w, target_h), edit_type, optimized_prompt_error
-
-        # 編集画像をPIL Imageに変換
-        edited_img = Image.open(BytesIO(edited_img_data))
-        edited_w, edited_h = edited_img.size
-        logger.info(f"Edited image size: {edited_w}x{edited_h}")
-
-        # 処理3の場合はアルファマット生成をスキップ
-        if process_num == 3:
-            # アップスケールのみ：アルファマットなし
-            logger.info("Process 3: Skipping alpha matte generation (upscale only)")
-            return (
-                (edited_img, edited_img_data, edited_w, edited_h),
-                None,
-                None,
-                (input_w, input_h),
-                (target_w, target_h),
-                edit_type,
-                optimized_prompt_error,
-            )
-
-        # 2ターン目: アルファマット生成（処理1,2のみ）
-        alpha_prompt = self.ALPHA_MATTE_PROMPTS[alpha_prompt_choice]
-        logger.info("Sending turn 2: Alpha matte generation")
-        response_2 = chat.send_message(alpha_prompt)
-
-        # アルファマット画像を取得
-        alpha_matte_data = None
-        for part in response_2.parts:
-            if part.text is not None:
-                logger.info(f"API response (turn 2): {part.text}")
-            elif hasattr(part, "inline_data") and part.inline_data:
-                data_field = part.inline_data.data
-                if isinstance(data_field, str):
-                    alpha_matte_data = base64.b64decode(data_field)
-                else:
-                    alpha_matte_data = data_field
-
-        if alpha_matte_data is None:
-            return (
-                (edited_img, edited_img_data, edited_w, edited_h),
-                None,
-                None,
-                (input_w, input_h),
-                (target_w, target_h),
-                edit_type,
-                optimized_prompt_error,
-            )
-
-        # アルファマット画像をPIL Imageに変換（表示用）
-        alpha_matte_img = Image.open(BytesIO(alpha_matte_data))
-
-        # RGBA合成（ローカル処理）
-        rgba_bytes = self.compose_alpha_channel(edited_img, alpha_matte_data)
-        rgba_img = Image.open(BytesIO(rgba_bytes))
-
-        return (
-            (edited_img, edited_img_data, edited_w, edited_h),
-            (alpha_matte_img, alpha_matte_data),
-            (rgba_img, rgba_bytes),
-            (input_w, input_h),
-            (target_w, target_h),
-            edit_type,
-            optimized_prompt_error,
-        )
-
-    def _save_outputs(
-        self,
-        edited_img_data: bytes,
-        alpha_matte_data: bytes,
-        rgba_bytes: bytes,
-        save_edited_image: bool,
-    ) -> tuple[Optional[Path], Optional[Path], Optional[Path], Optional[Path]]:
-        """
-        ファイル保存処理
-
-        Returns:
-            (edited_path, matte_path, rgba_path, json_path)
-        """
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        import random
-        import string
-
-        unique_id = "".join(
-            random.choices(string.ascii_lowercase + string.digits, k=6)
-        )
-        base_filename = f"alpha_matte_{timestamp}_{unique_id}"
-
-        # ファイル保存処理（HF Spacesでは無効化）
-        edited_path = None
-        matte_path = None
-        rgba_path = None
-        json_path = None
-
-        if not self.app.output_manager.disable_save:
-            output_dir = Path("output")
-            output_dir.mkdir(exist_ok=True)
-
-            # 編集画像を保存（オプション）
-            if save_edited_image:
-                edited_path = output_dir / f"{base_filename}_edited.png"
-                with open(edited_path, "wb") as f:
-                    f.write(edited_img_data)
-
-            # アルファマット保存
-            matte_path = output_dir / f"{base_filename}_matte.png"
-            with open(matte_path, "wb") as f:
-                f.write(alpha_matte_data)
-
-            # RGBA画像保存
-            rgba_path = output_dir / f"{base_filename}_rgba.png"
-            with open(rgba_path, "wb") as f:
-                f.write(rgba_bytes)
-
-            # メタデータは _build_response で生成されるので、ここではパスだけ返す
-            json_path = output_dir / f"{base_filename}.json"
-
-        return edited_path, matte_path, rgba_path, json_path
-
-    def _build_response(
-        self,
-        model_name: str,
-        aspect_ratio: str,
-        resolution: str,
-        lighting_enabled: bool,
-        alpha_prompt_choice: str,
-        edited_w: int,
-        edited_h: int,
-        input_w: int,
-        input_h: int,
-        target_w: int,
-        target_h: int,
-        edit_type: str,
-        rgba_bytes: bytes,
-        edited_path: Optional[Path],
-        matte_path: Optional[Path],
-        rgba_path: Optional[Path],
-        json_path: Optional[Path],
-    ) -> tuple[str, str]:
-        """
-        レスポンステキストとJSONログを構築
-
-        Returns:
-            (info_text, json_log)
-        """
-        # 生成情報テキスト
-        if self.app.output_manager.disable_save:
-            file_info = "- ファイル保存無効（クラウドデプロイモード）"
-        else:
-            file_info = f"""- 編集後RGB: {edited_path if edited_path else "(保存なし)"}
-- アルファマット: {matte_path}
-- RGBA合成: {rgba_path}
-- メタデータ: {json_path}"""
-
-        info_text = f"""### 処理完了 ✅
-
-**モデル**: {model_name}
-**編集タイプ**: {edit_type}
-**解像度**: {edited_w} x {edited_h} ({resolution})
-**アスペクト比**: {aspect_ratio}
-
-**出力ファイル**:
-{file_info}
 """
 
-        # JSONログ（メタデータ構築）
-        metadata = {
-            "timestamp": datetime.now().isoformat(),
-            "input_resolution": {"width": input_w, "height": input_h},
-            "target_resolution": {"width": target_w, "height": target_h},
-            "edited_resolution": {"width": edited_w, "height": edited_h},
-            "edit_type": edit_type,
-            "generation": {
-                "model": model_name,
-                "aspect_ratio": aspect_ratio,
-                "resolution": resolution,
-                "lighting_enabled": lighting_enabled,
-                "alpha_prompt_choice": alpha_prompt_choice,
-                "file_save_enabled": not self.app.output_manager.disable_save,
-            },
-        }
+WARNING_EMPTY_OPTIMIZED_PROMPT = """⚠️ 警告: 最適化済みプロンプトが空です
 
-        # メタデータJSONファイルを保存
-        if json_path is not None and not self.app.output_manager.disable_save:
-            metadata_for_file = metadata.copy()
-            metadata_for_file["generation"]["edited_image_path"] = (
-                str(edited_path) if edited_path else None
-            )
-            metadata_for_file["generation"]["alpha_matte_path"] = (
-                str(matte_path) if matte_path else None
-            )
-            metadata_for_file["generation"]["rgba_output_path"] = (
-                str(rgba_path) if rgba_path else None
-            )
-            metadata_for_file["generation"]["rgba_size_bytes"] = len(rgba_bytes)
-
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(metadata_for_file, f, ensure_ascii=False, indent=2)
-
-        json_log = json.dumps(metadata, ensure_ascii=False, indent=2)
-        return info_text, json_log
-
-    def _get_process_type_number(self, process_type: str) -> int:
-        """処理タイプ文字列から番号を抽出"""
-        if "処理1" in process_type:
-            return 1
-        elif "処理2" in process_type:
-            return 2
-        elif "処理3" in process_type:
-            return 3
-        elif "処理4" in process_type:
-            return 4
-        else:
-            return 1  # デフォルト
-
-    def generate_optimized_prompt(
-        self,
-        prompt_text: str,
-        optimization_level: int,
-    ) -> str:
-        """
-        プロンプトのみを生成（画像生成なし）
-
-        プレビュー専用メソッド。最適化されたプロンプトを生成して返す。
-
-        Args:
-            prompt_text: ユーザーの追加指示
-            optimization_level: プロンプト最適化レベル（0/1/2）
-
-        Returns:
-            最適化されたプロンプト文字列
-        """
-        # 基本プロンプトはUPSCALE_ONLY_PROMPTのみ
-        edit_prompt = UPSCALE_ONLY_PROMPT
-
-        # プロンプト最適化（レベル0でも整合性チェックを実行）
-        try:
-            optimizer = PromptOptimizer(self.app.google_api_key)
-
-            if optimization_level == 0:
-                # レベル0: 整合性チェックのみ
-                optimized_prompt, _ = optimizer._level_0_consistency_check(
-                    edit_prompt, prompt_text
-                )
-            else:
-                # レベル1,2: Gemini 3.0 最適化
-                optimized_prompt, opt_error = optimizer.optimize(
-                    edit_prompt, prompt_text, optimization_level
-                )
-                if opt_error:
-                    return f"⚠️ 最適化エラー: {opt_error}\n\nフォールバックプロンプト:\n{optimized_prompt}"
-
-            return optimized_prompt
-
-        except Exception as e:
-            logger.error(f"Prompt optimization failed: {e}", exc_info=True)
-            # フォールバック: 整合性チェックのみ
-            try:
-                optimizer = PromptOptimizer(self.app.google_api_key)
-                fallback_prompt, _ = optimizer._level_0_consistency_check(
-                    edit_prompt, prompt_text
-                )
-                return f"⚠️ 最適化エラー: {str(e)}\n\nフォールバックプロンプト:\n{fallback_prompt}"
-            except:
-                return f"⚠️ エラー: {str(e)}\n\n基本プロンプト:\n{edit_prompt}"
-
-    def simple_upscale(
-        self,
-        model_name: str,
-        input_image: Optional[Image.Image],
-        prompt_text: str,
-        optimization_level: int,
-        optimized_prompt_from_ui: str,
-        aspect_ratio: str,
-        resolution: str,
-        enable_google_search: bool = False,
-    ) -> tuple[Optional[Image.Image], str, str]:
-        """
-        シンプルなアップスケール処理（1回のAPI呼び出しのみ）
-
-        Args:
-            model_name: Geminiモデル名
-            input_image: 入力画像
-            prompt_text: ユーザーの追加指示
-            optimization_level: プロンプト最適化レベル（0/1/2）
-            optimized_prompt_from_ui: UI経由で既に最適化されたプロンプト（空文字列なら新規生成）
-            aspect_ratio: アスペクト比
-            resolution: 解像度
-            enable_google_search: Google検索を有効化
-
-        Returns:
-            (output_image, output_info, optimized_prompt)
-        """
-        optimized_prompt_info = ""
-
-        # 1. 入力検証
-        error_result = self._validate_inputs(input_image)
-        if error_result:
-            return error_result
-
-        try:
-            # 2. 目標解像度を計算
-            target_w, target_h = self.calculate_target_resolution(aspect_ratio, resolution)
-
-            # 3. プロンプト最適化（UI経由で既に最適化済みの場合はスキップ）
-            if optimized_prompt_from_ui and optimized_prompt_from_ui.strip():
-                final_prompt = optimized_prompt_from_ui
-                logger.info("Using pre-optimized prompt from UI")
-            else:
-                optimizer = PromptOptimizer(self.app.google_api_key)
-                final_prompt, opt_error = optimizer.optimize(
-                    UPSCALE_ONLY_PROMPT, prompt_text, optimization_level
-                )
-                if opt_error:
-                    optimized_prompt_info = f"⚠️ プロンプト最適化エラー: {opt_error}"
-                    logger.warning(optimized_prompt_info)
-
-            # 4. 入力画像をRGBに変換
-            if input_image.mode == "RGBA":
-                background = Image.new("RGB", input_image.size, (255, 255, 255))
-                background.paste(input_image, mask=input_image.split()[3])
-                input_image = background
-            elif input_image.mode != "RGB":
-                input_image = input_image.convert("RGB")
-
-            input_w, input_h = input_image.size
-
-            # 5. 画像をバイナリに変換
-            img_buffer = BytesIO()
-            input_image.save(img_buffer, format="PNG")
-            img_bytes = img_buffer.getvalue()
-
-            # 6. Gemini API呼び出し
-            # Google Search対応
-            gen_config_dict = {
-                "response_modalities": ["image"],
-                "image_generation_config": types.ImageGenerationConfig(
-                    aspect_ratio=aspect_ratio,
-                    output_resolution=resolution,
-                ),
-            }
-
-            if enable_google_search:
-                gen_config_dict["tools"] = [{"google_search": {}}]
-                logger.info("Google Search tool enabled")
-
-            response = self.app.gemini_generator.generate_content(
-                model=model_name,
-                contents=[
-                    types.Part.from_bytes(
-                        data=img_bytes, mime_type="image/png"
-                    ),
-                    types.Part.from_text(text=final_prompt),
-                ],
-                config=types.GenerateContentConfig(**gen_config_dict),
-            )
-
-            # 7. 出力画像を取得
-            output_img_data = None
-            for part in response.candidates[0].content.parts:
-                if part.inline_data:
-                    output_img_data = base64.b64decode(part.inline_data.data)
-                    break
-
-            if not output_img_data:
-                return None, "❌ エラー: 画像生成に失敗しました", final_prompt
-
-            output_img = Image.open(BytesIO(output_img_data))
-            output_w, output_h = output_img.size
-
-            # 8. ファイル保存
-            output_path = None
-            if not self.app.output_manager.disable_save:
-                timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                unique_id = "".join(
-                    random.choices(string.ascii_lowercase + string.digits, k=6)
-                )
-                output_dir = Path("output")
-                output_dir.mkdir(exist_ok=True)
-                output_path = output_dir / f"upscale_{timestamp}_{unique_id}.png"
-                with open(output_path, "wb") as f:
-                    f.write(output_img_data)
-
-            # 9. レスポンス構築
-            info_text = f"""### 処理完了 ✅
-
-**モデル**: {model_name}
-**処理タイプ**: 生成アップスケール
-**入力解像度**: {input_w} x {input_h}
-**出力解像度**: {output_w} x {output_h} ({resolution})
-**アスペクト比**: {aspect_ratio}
-{f"**プロンプト最適化**: レベル{optimization_level}" if optimization_level > 0 else ""}
-{"**Google Search**: 有効" if enable_google_search else ""}
-{f"**⚠️ 最適化警告**: {optimized_prompt_info}" if optimized_prompt_info else ""}
-
-**出力ファイル**:
-- アップスケール画像: {output_path if output_path else "（ファイル保存無効）"}
+元のプロンプトを使用して生成します。
+先に「画像生成（プロンプトの最適化を実施してから生成）」を実行してください。
 """
 
-            return output_img, info_text, final_prompt
+ERROR_OPTIMIZED_PROMPT_HAS_ERROR = """⚠️ エラー: 最適化済みプロンプトにエラーが含まれています
 
-        except Exception as e:
-            logger.error(f"Upscale failed: {e}", exc_info=True)
-            error_text = f"❌ エラー: {str(e)}"
-            return None, error_text, ""
-
-    def edit_with_alpha_matte(
-        self,
-        process_type: str,
-        model_name: str,
-        input_image: Optional[Image.Image],
-        prompt_text: str,
-        optimization_level: int,
-        optimized_prompt_from_ui: str,  # NEW PARAMETER
-        aspect_ratio: str,
-        resolution: str,
-        lighting_enabled: bool,
-        alpha_prompt_choice: str,
-        save_edited_image: bool,
-    ) -> tuple[
-        Optional[Image.Image], Optional[Image.Image], Optional[Image.Image], str, str
-    ]:
-        """
-        マルチターン編集 + RGBA合成（2段階実行対応）
-
-        2つのモードをサポート:
-        1. プロンプト生成のみ（optimized_prompt_from_ui が空）
-        2. 画像生成実行（optimized_prompt_from_ui に値がある）
-
-        Args:
-            process_type: 処理タイプ（"処理1: ...", "処理2: ...", etc.）
-            optimization_level: プロンプト最適化レベル（0/1/2）
-            optimized_prompt_from_ui: UIから渡された最適化済みプロンプト
-
-        Returns:
-            (output_img1, output_img2, output_img3, info_text, json_log)
-        """
-        # 0. プロンプト生成のみモード（画像生成なし）
-        if not optimized_prompt_from_ui or optimized_prompt_from_ui.strip() == "":
-            # 入力検証（画像は不要）
-            optimized_prompt = self.generate_optimized_prompt(
-                process_type,
-                prompt_text,
-                optimization_level,
-                lighting_enabled,
-                alpha_prompt_choice,
-            )
-            # 画像生成せず、プロンプトのみを返す
-            return (
-                None,  # edited_image
-                None,  # alpha_matte
-                None,  # rgba_image
-                "✅ プロンプトを生成しました。内容を確認して「編集開始」をクリックしてください。",  # info_text
-                optimized_prompt,  # json_log → optimized_prompt display
-            )
-
-        # 1. 入力検証（画像生成モードの場合）
-        validation_error = self._validate_inputs(input_image)
-        if validation_error is not None:
-            return validation_error
-
-        # 処理タイプ番号を取得
-        process_num = self._get_process_type_number(process_type)
-
-        # 処理4は未実装
-        if process_num == 4:
-            return (
-                None,
-                None,
-                None,
-                "❌ 処理4（色温度調整）は現在未実装です。他の処理タイプを選択してください。",
-                "",
-            )
-
-        try:
-            # 2. マルチターン編集実行（最適化済みプロンプトを使用）
-            (
-                edited_result,
-                alpha_result,
-                rgba_result,
-                input_size,
-                target_size,
-                edit_type,
-                optimized_prompt_info,
-            ) = self._execute_multi_turn_edit(
-                input_image,
-                model_name,
-                "",  # prompt_text: 空文字列（既に最適化済み）
-                0,  # optimization_level: 0（最適化スキップ）
-                process_num,
-                aspect_ratio,
-                resolution,
-                lighting_enabled,
-                alpha_prompt_choice,
-                pre_optimized_prompt=optimized_prompt_from_ui,  # NEW PARAMETER
-            )
-
-            # 3. エラーチェック
-            if edited_result is None:
-                return None, None, None, "エラー: 編集画像を取得できませんでした", optimized_prompt_from_ui
-
-            # 処理3の場合はアルファマットなしが正常
-            if alpha_result is None and process_num != 3:
-                edited_img, _, _, _ = edited_result
-                return (
-                    edited_img,
-                    None,
-                    None,
-                    "エラー: アルファマット画像を取得できませんでした",
-                    optimized_prompt_from_ui,
-                )
-
-            # 4. 結果の展開
-            edited_img, edited_img_data, edited_w, edited_h = edited_result
-            input_w, input_h = input_size
-            target_w, target_h = target_size
-
-            # 処理3（アップスケールのみ）の場合は簡易処理
-            if process_num == 3:
-                # アルファマットなし：edited_imgのみ保存
-                if not self.app.output_manager.disable_save:
-                    timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-                    import random
-                    import string
-                    unique_id = "".join(
-                        random.choices(string.ascii_lowercase + string.digits, k=6)
-                    )
-                    output_dir = Path("output")
-                    output_dir.mkdir(exist_ok=True)
-                    edited_path = output_dir / f"upscale_{timestamp}_{unique_id}.png"
-                    with open(edited_path, "wb") as f:
-                        f.write(edited_img_data)
-
-                    info_text = f"""### 処理完了 ✅
-
-**モデル**: {model_name}
-**処理タイプ**: 処理3（生成アップスケール）
-**解像度**: {edited_w} x {edited_h} ({resolution})
-**アスペクト比**: {aspect_ratio}
-{f"**プロンプト最適化**: レベル{optimization_level}" if optimization_level > 0 else ""}
-{f"**⚠️ 最適化警告**: {optimized_prompt_info}" if optimized_prompt_info else ""}
-
-**出力ファイル**:
-- アップスケール画像: {edited_path}
-"""
-                else:
-                    info_text = f"""### 処理完了 ✅
-
-**モデル**: {model_name}
-**処理タイプ**: 処理3（生成アップスケール）
-**解像度**: {edited_w} x {edited_h} ({resolution})
-**ファイル保存**: 無効（クラウドデプロイモード）
+「画像生成（プロンプトの最適化を実施してから生成）」を再実行してください。
 """
 
-                return edited_img, None, None, info_text, optimized_prompt_from_ui
 
-            # 処理1,2の場合：アルファマット処理
-            alpha_matte_img, alpha_matte_data = alpha_result
-            rgba_img, rgba_bytes = rgba_result
-
-            # 5. ファイル保存
-            edited_path, matte_path, rgba_path, json_path = self._save_outputs(
-                edited_img_data, alpha_matte_data, rgba_bytes, save_edited_image
-            )
-
-            # 6. レスポンス構築
-            info_text, json_log = self._build_response(
-                model_name,
-                aspect_ratio,
-                resolution,
-                lighting_enabled,
-                alpha_prompt_choice,
-                edited_w,
-                edited_h,
-                input_w,
-                input_h,
-                target_w,
-                target_h,
-                edit_type,
-                rgba_bytes,
-                edited_path,
-                matte_path,
-                rgba_path,
-                json_path,
-            )
-
-            return edited_img, alpha_matte_img, rgba_img, info_text, optimized_prompt_from_ui
-
-        except Exception as e:
-            logger.error(f"Alpha matte generation failed: {e}", exc_info=True)
-            error_text = f"❌ エラー: {str(e)}"
-            return None, None, None, error_text, optimized_prompt_from_ui
+class BasicEditTab(BaseTab):
+    """Basic Edit (Image-to-Image) Tab"""
 
     def create_ui(self) -> None:
-        """ベーシック編集タブのUIを作成"""
+        """Create Basic Edit tab UI"""
         with gr.Tab(
             TAB_BASIC_EDIT.display_name,
             id=TAB_BASIC_EDIT.key,
             elem_id=TAB_BASIC_EDIT.elem_id,
         ):
-            gr.Markdown("""
-            # ベーシック編集
+            controls = self._build_layout()
+            self._bind_events(controls)
 
-            シンプルな1回編集に特化したタブ。入力画像を指定解像度にアップスケールします。
+    def _build_layout(self) -> BasicEditControls:
+        with gr.Row():
+            with gr.Column(scale=1):
+                (
+                    edit_model,
+                    edit_template,
+                    edit_prompt,
+                    edit_optimized_prompt,
+                    edit_optimization_level,
+                    edit_optimize_prompt_button,
+                    edit_input_image,
+                    edit_aspect_ratio,
+                    edit_image_size,
+                    edit_google_search,
+                    edit_gen_button_optimize_and_gen,
+                    edit_gen_button_use_opt,
+                    edit_gen_button_no_opt,
+                    edit_reset_button,
+                ) = self._build_input_column()
 
-            **処理フロー**:
-            1. 入力画像を読み込み
-            2. プロンプト最適化（アップスケール + ユーザー追加指示）
-            3. Gemini API呼び出し（1回のみ）
-            4. 出力画像を保存・表示
-            """)
+            with gr.Column(scale=1):
+                edit_output_image, edit_output_info, edit_output_json = (
+                    self._build_output_column()
+                )
 
-            with gr.Row():
-                # 左カラム: 入力エリア
-                with gr.Column(scale=1):
-                    # モデル選択
-                    # デフォルトモデルを選択（gemini-3-pro-image-preview を優先）
-                    default_model = "gemini-3-pro-image-preview"
-                    if default_model in self.app.gemini_models:
-                        model_default_value = default_model
-                    elif len(self.app.gemini_models) > 1:
-                        model_default_value = self.app.gemini_models[1]
-                    else:
-                        model_default_value = self.app.gemini_models[0]
+        return BasicEditControls(
+            model=edit_model,
+            template=edit_template,
+            prompt=edit_prompt,
+            optimized_prompt=edit_optimized_prompt,
+            optimization_level=edit_optimization_level,
+            optimize_prompt_button=edit_optimize_prompt_button,
+            input_image=edit_input_image,
+            aspect_ratio=edit_aspect_ratio,
+            image_size=edit_image_size,
+            google_search=edit_google_search,
+            gen_button_optimize_and_gen=edit_gen_button_optimize_and_gen,
+            gen_button_use_opt=edit_gen_button_use_opt,
+            gen_button_no_opt=edit_gen_button_no_opt,
+            reset_button=edit_reset_button,
+            output_image=edit_output_image,
+            output_info=edit_output_info,
+            output_json=edit_output_json,
+        )
 
-                    model_name = gr.Dropdown(
-                        label="モデル",
-                        choices=self.app.gemini_models,
-                        value=model_default_value,
-                        info="Gemini画像生成モデル",
-                    )
+    def _build_input_column(self):
+        # モデル選択
+        default_model = "gemini-3-pro-image-preview"
+        model_value = (
+            default_model
+            if default_model in self.app.gemini_models
+            else (self.app.gemini_models[0] if self.app.gemini_models else None)
+        )
 
-                    # 入力画像
-                    input_image = gr.Image(
-                        label="入力画像",
-                        type="pil",
-                        sources=["upload", "clipboard"],
-                    )
+        edit_model = gr.Dropdown(
+            label="モデル",
+            choices=self.app.gemini_models,
+            value=model_value,
+            info="Gemini画像生成モデル",
+        )
 
-                    # 追加指示
-                    prompt_text = gr.Textbox(
-                        label="追加指示（オプション）",
-                        placeholder="例: 髪の毛の細かい部分を重視してください",
-                        lines=3,
-                    )
+        # プロンプトテンプレート (image_edit カテゴリ)
+        edit_template = gr.Dropdown(
+            label="プロンプトテンプレート",
+            choices=self.app.template_manager.get_template_choices_for_tab(
+                "gemini_edit01"  # Maps to 'image_edit' category
+            ),
+            value="選択してください",
+            info="サンプルプロンプトを選択",
+        )
 
-                    # 最適化されたプロンプト表示 (NEW)
-                    optimized_prompt_display = gr.Textbox(
-                        label="最適化されたプロンプト",
-                        placeholder="「プロンプト生成」または「編集開始」をクリックすると、最適化されたプロンプトが表示されます",
-                        lines=5,
-                        interactive=True,
-                        info="生成前にプロンプトを確認・編集できます",
-                    )
+        # ユーザープロンプト
+        edit_prompt = gr.Textbox(
+            label="ユーザープロンプト",
+            placeholder="生成したい画像を説明してください",
+            lines=4,
+        )
 
-                    # プロンプト最適化レベル
-                    optimization_level = gr.Radio(
-                        label="プロンプト最適化レベル",
-                        choices=[
-                            ("レベル0: 最適化なし（整合性チェックのみ）", 0),
-                            ("レベル1: Gemini 3.0 自動最適化（推奨）", 1),
-                            ("レベル2: Gemini 3.0 誇張表現追加", 2),
-                        ],
-                        value=1,
-                        info="Gemini 3.0でプロンプトを最適化します",
-                    )
+        # 最適化されたプロンプト表示
+        edit_optimized_prompt = gr.Textbox(
+            label="最適化されたプロンプト",
+            placeholder="「プロンプト生成」または「編集開始」をクリックすると、最適化されたプロンプトが表示されます",
+            lines=5,
+            interactive=True,
+            info="生成前にプロンプトを確認・編集できます",
+        )
 
-                    # アスペクト比
-                    aspect_ratio = gr.Dropdown(
-                        label="アスペクト比",
-                        choices=[
-                            "1:1",
-                            "2:3",
-                            "3:2",
-                            "3:4",
-                            "4:3",
-                            "4:5",
-                            "5:4",
-                            "9:16",
-                            "16:9",
-                            "21:9",
-                        ],
-                        value=self.app.default_aspect_ratio,
-                        info="出力画像の縦横比",
-                    )
+        # プロンプト最適化レベル
+        edit_optimization_level = gr.Radio(
+            label="プロンプト最適化レベル",
+            choices=[
+                ("レベル1: 修正のみ（誤字脱字・語順）", 1),
+                ("レベル2: 標準最適化（推奨）", 2),
+                ("レベル3: 創造的拡張", 3),
+            ],
+            value=1,
+            info="レベル1推奨: Gemini 2.0 Flashで誤字脱字を修正",
+        )
 
-                    # 解像度
-                    resolution = gr.Dropdown(
-                        label="解像度",
-                        choices=["1K", "2K", "4K"],
-                        value="1K",
-                        info="出力画像の解像度",
-                    )
+        # 最適化プロンプト生成ボタン
+        edit_optimize_prompt_button = gr.Button(
+            "最適化プロンプト生成",
+            variant="secondary",
+            size="sm",
+        )
 
-                    # ツールオプション
-                    with gr.Accordion("ツールオプション", open=False):
-                        enable_google_search = gr.Checkbox(
-                            label="Google Search",
-                            value=False,
-                            info="Google検索でリアルタイム情報を取得（Gemini 3 Pro Image推奨）"
-                        )
+        # 入力画像 (Single)
+        # type="filepath" to get filename for optimizer context
+        edit_input_image = gr.Image(
+            label="入力画像",
+            type="filepath",
+            sources=["upload", "clipboard"],
+            height=300,
+        )
 
-                    # ボタン
-                    with gr.Row():
-                        edit_button = gr.Button("編集開始", variant="primary")
-                        generate_prompt_button = gr.Button("プロンプト生成", variant="secondary", size="sm")  # NEW
-                        reset_button = gr.Button("リセット")
-
-                # 右カラム: 出力エリア
-                with gr.Column(scale=1):
-                    output_img = gr.Image(label="出力画像（アップスケール後）", type="pil")
-                    output_info = gr.Markdown(label="生成情報")
-
-            # イベントハンドラ
-            # プロンプト生成ボタン
-            generate_prompt_button.click(
-                fn=self.generate_optimized_prompt,
-                inputs=[
-                    prompt_text,
-                    optimization_level,
+        # 詳細設定
+        with gr.Accordion("詳細設定", open=True):
+            edit_aspect_ratio = gr.Radio(
+                label="アスペクト比",
+                choices=[
+                    "1:1", "2:3", "3:2", "3:4", "4:3",
+                    "4:5", "5:4", "9:16", "16:9", "21:9"
                 ],
-                outputs=[optimized_prompt_display],
+                value=self.app.default_aspect_ratio,
+                info="生成画像の縦横比（全10種類サポート）",
             )
 
-            # 編集開始ボタン
-            edit_button.click(
-                fn=self.simple_upscale,
-                inputs=[
-                    model_name,
-                    input_image,
-                    prompt_text,
-                    optimization_level,
-                    optimized_prompt_display,
-                    aspect_ratio,
-                    resolution,
-                    enable_google_search,
-                ],
-                outputs=[
-                    output_img,
-                    output_info,
-                    optimized_prompt_display,
-                ],
+            edit_image_size = gr.Radio(
+                label="解像度",
+                choices=["1K", "2K", "4K"],
+                value=DEFAULT_IMAGE_SIZE,
+                info="Gemini 3 Pro Image Preview で有効（他モデルでは無視されます）",
             )
 
-            reset_button.click(
-                fn=lambda: (
-                    None,  # input_image
-                    "",  # prompt_text
-                    "",  # optimized_prompt_display
-                    "1:1",  # aspect_ratio
-                    "1K",  # resolution
-                    False,  # enable_google_search
-                    None,  # output_img
-                    "",  # output_info
-                ),
-                inputs=[],
-                outputs=[
-                    input_image,
-                    prompt_text,
-                    optimized_prompt_display,
-                    aspect_ratio,
-                    resolution,
-                    enable_google_search,
-                    output_img,
-                    output_info,
-                ],
+        # ツールオプション
+        with gr.Accordion("ツールオプション", open=False):
+            edit_google_search = gr.Checkbox(
+                label="Google Search",
+                value=False,
+                info="Google検索でリアルタイム情報を取得（Gemini 3 Pro Image推奨）"
             )
+
+        # ボタン（2行2列レイアウト）
+        with gr.Row():
+            edit_gen_button_optimize_and_gen = gr.Button(
+                "画像生成（プロンプトの最適化を実施してから生成）",
+                variant="primary",
+                size="sm",
+            )
+            edit_gen_button_use_opt = gr.Button(
+                "画像生成（最適化済みプロンプトで生成）",
+                variant="secondary",
+                size="sm",
+            )
+
+        with gr.Row():
+            edit_gen_button_no_opt = gr.Button(
+                "画像生成（ユーザープロンプトで生成）",
+                variant="secondary",
+                size="sm",
+            )
+            edit_reset_button = gr.Button(
+                "リセット",
+                size="sm",
+            )
+
+        return (
+            edit_model,
+            edit_template,
+            edit_prompt,
+            edit_optimized_prompt,
+            edit_optimization_level,
+            edit_optimize_prompt_button,
+            edit_input_image,
+            edit_aspect_ratio,
+            edit_image_size,
+            edit_google_search,
+            edit_gen_button_optimize_and_gen,
+            edit_gen_button_use_opt,
+            edit_gen_button_no_opt,
+            edit_reset_button,
+        )
+
+    def _build_output_column(self):
+        edit_output_image = gr.Image(label="生成された画像", type="pil")
+        edit_output_info = gr.Markdown(label="生成情報")
+        with gr.Accordion("JSONログ", open=False):
+            edit_output_json = gr.Code(language="json", label="メタデータ")
+        return edit_output_image, edit_output_info, edit_output_json
+
+    def _bind_events(self, controls: BasicEditControls) -> None:
+        # テンプレート適用
+        controls.template.change(
+            fn=self.app.apply_template,
+            inputs=[controls.template],
+            outputs=[controls.prompt],
+        )
+
+        # Button 1: No optimization
+        controls.gen_button_no_opt.click(
+            fn=self.generate_image_no_optimization,
+            inputs=[
+                controls.prompt,
+                controls.input_image,
+                controls.model,
+                controls.aspect_ratio,
+                controls.image_size,
+                controls.google_search,
+            ],
+            outputs=[
+                controls.output_image,
+                controls.output_info,
+                controls.output_json,
+                controls.optimized_prompt,
+            ],
+        )
+
+        # Button 2: Use pre-optimized
+        controls.gen_button_use_opt.click(
+            fn=self.generate_image_with_preoptimized,
+            inputs=[
+                controls.prompt,
+                controls.optimized_prompt,
+                controls.input_image,
+                controls.model,
+                controls.aspect_ratio,
+                controls.image_size,
+                controls.google_search,
+            ],
+            outputs=[
+                controls.output_image,
+                controls.output_info,
+                controls.output_json,
+                controls.optimized_prompt,
+            ],
+        )
+
+        # Button 3: Optimize then generate
+        controls.gen_button_optimize_and_gen.click(
+            fn=self.generate_image_with_optimization,
+            inputs=[
+                controls.prompt,
+                controls.optimization_level,
+                controls.input_image,
+                controls.model,
+                controls.aspect_ratio,
+                controls.image_size,
+                controls.google_search,
+            ],
+            outputs=[
+                controls.output_image,
+                controls.output_info,
+                controls.output_json,
+                controls.optimized_prompt,
+            ],
+        )
+
+        # Optimize prompt only
+        controls.optimize_prompt_button.click(
+            fn=self.generate_optimized_prompt,
+            inputs=[
+                controls.prompt,
+                controls.optimization_level,
+                controls.input_image,
+            ],
+            outputs=[
+                controls.optimized_prompt,
+            ],
+        )
+
+        # Reset
+        controls.reset_button.click(
+            fn=lambda: (
+                "", "", 1, None, self.app.default_aspect_ratio, DEFAULT_IMAGE_SIZE, False, None, "", ""
+            ),
+            outputs=[
+                controls.prompt,
+                controls.optimized_prompt,
+                controls.optimization_level,
+                controls.input_image,
+                controls.aspect_ratio,
+                controls.image_size,
+                controls.google_search,
+                controls.output_image,
+                controls.output_info,
+                controls.output_json,
+            ],
+        )
+
+    def _optimize_prompt_internal(
+        self,
+        prompt_text: str,
+        optimization_level: int,
+        image_path: Optional[str],
+    ) -> Tuple[str, Optional[str]]:
+        """
+        共通のプロンプト最適化ヘルパー
+        """
+        if optimization_level <= 0:
+            return prompt_text, None
+
+        file_paths = [image_path] if image_path else None
+
+        try:
+            optimizer = PromptOptimizer(self.app.google_api_key)
+            # Tab2では Base Prompt が空の場合、Input Prompt自体をBaseとして扱う
+            # またはテンプレート選択によって prompt_text に既に Base Prompt が入っている
+            optimized_prompt, opt_error = optimizer.optimize(
+                base_prompt="",  # Base prompt is integrated in prompt_text
+                user_instructions=prompt_text,
+                level=optimization_level,
+                file_paths=file_paths,
+            )
+            if opt_error:
+                return optimized_prompt, opt_error
+            return optimized_prompt, None
+
+        except Exception as e:
+            logger.error(f"Optimization error: {e}", exc_info=True)
+            return prompt_text, str(e)
+
+    def generate_optimized_prompt(
+        self,
+        prompt_text: str,
+        optimization_level: int,
+        image_path: Optional[str],
+    ) -> str:
+        """プロンプトのみ生成"""
+        if not prompt_text.strip() and not image_path:
+            return "⚠️ プロンプトを入力するか、画像を選択してください"
+
+        final_prompt, opt_error = self._optimize_prompt_internal(
+            prompt_text, optimization_level, image_path
+        )
+        if opt_error:
+            return f"⚠️ 最適化エラー: {opt_error}\n\nフォールバック:\n{final_prompt}"
+        return final_prompt
+
+    def _generate_image_core(
+        self,
+        prompt: str,
+        optimization_level: int,
+        optimized_prompt_from_ui: str,
+        input_image_path: Optional[str],
+        model_name: str,
+        aspect_ratio: str,
+        image_size: str,
+        enable_google_search: bool,
+    ) -> Tuple[Optional[Image.Image], str, str, str]:
+        """
+        画像生成の共通ロジック
+        """
+        start_time = time.perf_counter()
+
+        if self.app.test_mode:
+            return None, "⚠ テストモード: 画像生成機能は無効です", "", ""
+
+        if not self.app.google_api_key or self.app.gemini_generator is None:
+            return None, ERROR_API_KEY_NOT_CONFIGURED, "", ""
+
+        if not input_image_path:
+            return None, "⚠️ エラー: 入力画像を選択してください", "", ""
+
+        try:
+            # プロンプト決定
+            optimized_prompt_info = None
+            if optimized_prompt_from_ui and optimized_prompt_from_ui.strip():
+                final_prompt = optimized_prompt_from_ui
+            else:
+                final_prompt, opt_error = self._optimize_prompt_internal(
+                    prompt, optimization_level, input_image_path
+                )
+                if opt_error:
+                    optimized_prompt_info = opt_error
+
+            # 画像読み込み
+            try:
+                input_pil_image = Image.open(input_image_path)
+            except Exception as e:
+                return None, f"❌ 画像読み込みエラー: {e}", "", ""
+
+            # 設定
+            config = GenerationConfig(
+                model_type=ModelType.TEST if model_name == TEST_MODEL_NAME else ModelType.GEMINI,
+                model_name=model_name,
+                prompt=final_prompt,
+                aspect_ratio=aspect_ratio,
+                number_of_images=1,
+                image_size=image_size,
+                enable_google_search=enable_google_search,
+                reference_images=[input_pil_image], # Single input image as reference
+            )
+
+            # 生成実行
+            generator = self.app.test_generator if model_name == TEST_MODEL_NAME else self.app.gemini_generator
+            image_data_list, metadata = generator.generate(config)
+
+            if not image_data_list:
+                return None, "❌ 生成された画像データがありません", "", final_prompt
+
+            # 結果構築
+            pil_image = Image.open(io.BytesIO(image_data_list[0]))
+            
+            save_result = self.app.output_manager.save_image_with_metadata(
+                image_data=image_data_list[0],
+                metadata=metadata,
+                prefix=GEMINI_OUTPUT_PREFIX,
+                extension="jpg",
+            )
+
+            info_text = f"### 生成完了 ✅\n\n**モデル**: {model_name}\n"
+            if save_result:
+                image_path, metadata_path = save_result
+                info_text += f"**画像ファイル**: `{image_path.name}`\n"
+                info_text += f"**メタデータ**: `{metadata_path.name}`\n"
+            else:
+                info_text += "**ファイル保存**: 無効\n"
+            
+            if optimized_prompt_info:
+                info_text += f"**⚠️ 最適化警告**: {optimized_prompt_info}\n"
+
+            json_log = json.dumps(metadata, ensure_ascii=False, indent=2)
+
+            return pil_image, info_text, json_log, final_prompt
+
+        except Exception as e:
+            logger.error(f"Image generation error: {e}", exc_info=True)
+            return None, f"❌ エラー: {str(e)}", "", ""
+
+    def generate_image_no_optimization(
+        self,
+        prompt,
+        input_image,
+        model,
+        ar,
+        size,
+        search
+    ):
+        return self._generate_image_core(
+            prompt, 0, "", input_image, model, ar, size, search
+        )
+
+    def generate_image_with_preoptimized(
+        self,
+        prompt, opt_prompt, input_image, model, ar, size, search
+    ):
+        if not opt_prompt.strip():
+            return self.generate_image_no_optimization(prompt, input_image, model, ar, size, search)
+        return self._generate_image_core(
+            prompt, 0, opt_prompt, input_image, model, ar, size, search
+        )
+
+    def generate_image_with_optimization(
+        self,
+        prompt, level, input_image, model, ar, size, search
+    ):
+        return self._generate_image_core(
+            prompt, level, "", input_image, model, ar, size, search
+        )

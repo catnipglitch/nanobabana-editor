@@ -189,6 +189,7 @@ class MultiTurnEditTab(BaseTab):
         lighting_enabled: bool,
         alpha_prompt_choice: str,
         pre_optimized_prompt: Optional[str] = None,  # NEW PARAMETER
+        enable_google_search: bool = False,
     ) -> tuple[
         Optional[tuple[Image.Image, bytes, int, int]],  # (edited_img, edited_img_data, w, h)
         Optional[tuple[Image.Image, bytes]],  # (alpha_matte_img, alpha_matte_data)
@@ -205,6 +206,7 @@ class MultiTurnEditTab(BaseTab):
             process_num: 処理タイプ番号（1/2）
             optimization_level: プロンプト最適化レベル（0/1/2）
             pre_optimized_prompt: 既に最適化されたプロンプト（UI経由）
+            enable_google_search: Google検索を有効にするか（default: False）
 
         Returns:
             (edited_result, alpha_result, rgba_result, input_size, target_size, edit_type, optimized_prompt_info)
@@ -279,14 +281,22 @@ class MultiTurnEditTab(BaseTab):
         # Geminiチャット作成
         client = genai.Client(api_key=self.app.google_api_key, vertexai=False)
 
+        # Google Search設定
+        config_kwargs = {
+            "response_modalities": ["TEXT", "IMAGE"],
+            "image_config": types.ImageConfig(
+                aspect_ratio=aspect_ratio, image_size=resolution
+            ),
+        }
+
+        # Google Search有効化（Gemini 3 Pro Imageで推奨）
+        if enable_google_search:
+            config_kwargs["tools"] = [types.Tool(google_search=types.GoogleSearch())]
+            logger.info("Google Search enabled for multiturn editing")
+
         chat = client.chats.create(
             model=model_name,
-            config=types.GenerateContentConfig(
-                response_modalities=["TEXT", "IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio=aspect_ratio, image_size=resolution
-                ),
-            ),
+            config=types.GenerateContentConfig(**config_kwargs),
         )
 
         # 1ターン目: 画像編集
@@ -599,6 +609,7 @@ class MultiTurnEditTab(BaseTab):
         lighting_enabled: bool,
         alpha_prompt_choice: str,
         save_edited_image: bool,
+        enable_google_search: bool = False,
     ) -> tuple[
         Optional[Image.Image], Optional[Image.Image], Optional[Image.Image], str, str
     ]:
@@ -613,6 +624,7 @@ class MultiTurnEditTab(BaseTab):
             process_type: 処理タイプ（"処理1: ...", "処理2: ...", etc.）
             optimization_level: プロンプト最適化レベル（0/1/2）
             optimized_prompt_from_ui: UIから渡された最適化済みプロンプト
+            enable_google_search: Google検索を有効にするか（default: False）
 
         Returns:
             (output_img1, output_img2, output_img3, info_text, json_log)
@@ -665,6 +677,7 @@ class MultiTurnEditTab(BaseTab):
                 lighting_enabled,
                 alpha_prompt_choice,
                 pre_optimized_prompt=optimized_prompt_from_ui,  # NEW PARAMETER
+                enable_google_search=enable_google_search,
             )
 
             # 3. エラーチェック
@@ -810,43 +823,42 @@ class MultiTurnEditTab(BaseTab):
                     optimization_level = gr.Radio(
                         label="プロンプト最適化レベル",
                         choices=[
-                            ("レベル0: 最適化なし（整合性チェックのみ）", 0),
-                            ("レベル1: Gemini 3.0 自動最適化（推奨）", 1),
-                            ("レベル2: Gemini 3.0 誇張表現追加", 2),
+                            ("レベル0: 無効（整合性チェックのみ）", 0),
+                            ("レベル1: 修正のみ（誤字脱字・語順）", 1),
+                            ("レベル2: 標準最適化（推奨）", 2),
+                            ("レベル3: 創造的拡張", 3),
                         ],
                         value=1,
-                        info="Gemini 3.0でプロンプトを最適化します",
-                    )
-
-                    # アスペクト比
-                    aspect_ratio = gr.Dropdown(
-                        label="アスペクト比",
-                        choices=[
-                            "1:1",
-                            "2:3",
-                            "3:2",
-                            "3:4",
-                            "4:3",
-                            "4:5",
-                            "5:4",
-                            "9:16",
-                            "16:9",
-                            "21:9",
-                        ],
-                        value=self.app.default_aspect_ratio,
-                        info="出力画像の縦横比",
-                    )
-
-                    # 解像度
-                    resolution = gr.Dropdown(
-                        label="解像度",
-                        choices=["1K", "2K", "4K"],
-                        value="1K",
-                        info="出力画像の解像度",
+                        info="レベル1推奨: Gemini 2.0 Flashで誤字脱字を修正",
                     )
 
                     # 詳細設定
                     with gr.Accordion("詳細設定", open=True):
+                        aspect_ratio = gr.Radio(
+                            label="アスペクト比",
+                            choices=[
+                                "1:1",
+                                "2:3",
+                                "3:2",
+                                "3:4",
+                                "4:3",
+                                "4:5",
+                                "5:4",
+                                "9:16",
+                                "16:9",
+                                "21:9",
+                            ],
+                            value=self.app.default_aspect_ratio,
+                            info="出力画像の縦横比",
+                        )
+
+                        resolution = gr.Radio(
+                            label="解像度",
+                            choices=["1K", "2K", "4K"],
+                            value="1K",
+                            info="出力画像の解像度",
+                        )
+
                         lighting_enabled = gr.Checkbox(
                             label="ライティング調整を有効化",
                             value=True,
@@ -866,10 +878,18 @@ class MultiTurnEditTab(BaseTab):
                             info="中間生成物のRGB画像をファイルに保存",
                         )
 
+                    # ツールオプション
+                    with gr.Accordion("ツールオプション", open=False):
+                        enable_google_search = gr.Checkbox(
+                            label="Google Search",
+                            value=False,
+                            info="Google検索でリアルタイム情報を取得（Gemini 3 Pro Image推奨）"
+                        )
+
                     # ボタン
                     with gr.Row():
                         edit_button = gr.Button("編集開始", variant="primary")
-                        generate_prompt_button = gr.Button("プロンプト生成", variant="secondary", size="sm")  # NEW
+                        generate_prompt_button = gr.Button("最適化プロンプト生成", variant="secondary", size="sm")  # NEW
                         reset_button = gr.Button("リセット")
 
                 # 右カラム: 出力エリア
@@ -916,6 +936,7 @@ class MultiTurnEditTab(BaseTab):
                     lighting_enabled,
                     alpha_prompt_choice,
                     save_edited_image,
+                    enable_google_search,
                 ],
                 outputs=[
                     output_img1,
@@ -936,6 +957,7 @@ class MultiTurnEditTab(BaseTab):
                     True,  # lighting_enabled
                     "人物用（実写）- 推奨",  # alpha_prompt_choice
                     True,  # save_edited_image
+                    False,  # enable_google_search
                     None,  # output_img1
                     None,  # output_img2
                     None,  # output_img3
@@ -951,6 +973,7 @@ class MultiTurnEditTab(BaseTab):
                     lighting_enabled,
                     alpha_prompt_choice,
                     save_edited_image,
+                    enable_google_search,
                     output_img1,
                     output_img2,
                     output_img3,

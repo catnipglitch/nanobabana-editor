@@ -1,0 +1,8 @@
+# Multi-Image プロンプトテンプレート
+# nanobanana-editor で使用する複数画像参照用テンプレート集
+# Tab 3 (gemini_edit02): 3.複数画像から生成
+
+[[templates]]
+name = "SNS広告（入力1キャラ＋入力2ポーズ）"
+category = "multi_image"
+prompt = """Create a high-quality SNS advertisement image featuring the character from Input 1 in the pose from Input 2."""

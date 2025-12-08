@@ -1,0 +1,137 @@
+# Image Edit プロンプトテンプレート
+# nanobanana-editor で使用する画像編集用テンプレート集
+
+[[templates]]
+name = "生成アップスケール"
+category = "image_edit"
+prompt = """Upscale the input image to the specified resolution and aspect ratio with high quality.
+Preserve the original content, composition, and color tone of the image.
+Naturally supplement details and output a sharp, clear high-resolution image.
+Minimize artifacts and noise while maintaining professional quality."""
+
+
+# 1. 自動補正（Auto）
+[[templates]]
+name = "自動色温度調整（オート） / 参考色温度 : 自動解析"
+category = "image_edit"
+prompt = """Automatically analyze the input image and correct the color temperature to achieve a neutral and natural tone.
+Adjust both temperature and tint using scene analysis.
+Remove excessive warm or cool bias while preserving detail and texture."""
+
+# 2. 晴天（日光）
+[[templates]]
+name = "晴天（日光） / 参考色温度 : 約 5200K ～ 5500K"
+category = "image_edit"
+prompt = """Adjust the image to match daylight color temperature (~5200–5500K).
+Apply natural correction for outdoor scenes under direct sunlight.
+Balance warmth and clarity while maintaining accurate color reproduction."""
+
+# 3. 曇り（Cloudy）
+[[templates]]
+name = "曇り / 参考色温度 : 約 6000K ～ 6500K"
+category = "image_edit"
+prompt = """Adjust color temperature to match cloudy daylight (~6000–6500K).
+Slightly warm the image to compensate for the cool cast typical of overcast conditions.
+Preserve natural skin tones and overall neutrality."""
+
+# 4. 日陰（Shade）
+[[templates]]
+name = "日陰 / 参考色温度 : 約 7000K ～ 8000K"
+category = "image_edit"
+prompt = """Adjust the color temperature to match shaded environments (~7000–8000K).
+Increase warmth to counteract the strong blue cast typical in shaded areas.
+Maintain color accuracy and natural ambient feel."""
+
+# 5. 白熱球（Tungsten / Incandescent）
+[[templates]]
+name = "白熱球 / 参考色温度 : 約 2800K ～ 3200K"
+category = "image_edit"
+prompt = """Correct the warm orange cast of tungsten lighting (~2800–3200K).
+Shift toward cooler tones to achieve a neutral and professional appearance.
+Retain fine detail, contrast, and realistic color reproduction."""
+
+# 6. 蛍光灯（Fluorescent）
+[[templates]]
+name = "蛍光灯 / 参考色温度 : 約 4000K ～ 4500K（緑かぶり補正）"
+category = "image_edit"
+prompt = """Correct color temperature for fluorescent lighting (~4000–4500K).
+Neutralize the typical green or cool bias while restoring natural skin tones.
+Maintain clarity and accurate ambient lighting feel."""
+
+# 7. フラッシュ（Flash）
+[[templates]]
+name = "フラッシュ / 参考色温度 : 約 5500K"
+category = "image_edit"
+prompt = """Adjust color temperature for flash illumination (~5500K).
+Slightly warm the image to compensate for the cool nature of flash light.
+Preserve detail and ensure balanced and natural color rendering."""
+
+# 8. カスタム色温度（Kelvin 指定）
+[[templates]]
+name = "カスタム色温度（Kelvin指定） / 参考色温度 : 任意"
+category = "image_edit"
+prompt = """Adjust the image using a specified custom Kelvin value.
+Apply precise temperature and tint correction while preserving natural tonality.
+Ensure accurate color balance appropriate for the selected Kelvin level."""
+
+# 追加ライティング・補正プリセット（生成AI用プロンプトテンプレート）
+# 特殊なシチュエーションに特化した色温度・光補正テンプレート
+# 共通前提: 元画像の雰囲気・構図・被写体の特徴を維持する（フラッシュ白飛びは可能な範囲で自然に補完）
+
+# スタジオフォト向けライティング：ポートレート用
+[[templates]]
+name = "スタジオポートレート向け色温度・ライティング調整 / 参考色温度 : 約 5200K ～ 6000K"
+category = "image_edit"
+prompt = """Enhance the lighting and color temperature for a professional studio portrait.
+Target a neutral to slightly warm tone (approx. 5200–6000K) suitable for commemorative, high-quality photography.
+Preserve the subject’s original appearance while improving dimensional depth, soft highlight roll-off, and natural skin tones.
+Maintain the original atmosphere but refine lighting contrast to achieve a premium studio-grade finish.
+Ensure no artificial smoothing or distortion unless necessary for a natural, high-end portrait look."""
+
+
+
+# レンズ変更・生成拡張テンプレート（スナップ人物向け） 既存スナップに対して特定レンズ・焦点距離・絞り値を再現しつつ生成拡張するテンプレート
+# 構図：三分割法 右上の交点に顔・目を配置するバージョン
+
+[[templates]]
+name = "右上構図：100mm F2 レンズシミュレーション（生成拡張）"
+category = "image_edit"
+prompt = """Simulate shooting the existing image with a 100mm F2 lens.
+Maintain the subject’s apparent size while applying natural telephoto compression.
+Reconstruct background depth, bokeh characteristics, and field curvature consistent with 100mm optics.
+Place the subject’s face and eyes precisely on the upper-right intersection of the rule-of-thirds grid.
+Use F2 aperture rendering: shallow depth of field, smooth Gaussian-like bokeh, and gentle falloff.
+Generate missing peripheral areas through image extension while maintaining realism and optical coherence.
+Apply exposure metadata equivalent to: focal length 100mm, aperture F2, shutter speed 1/250, ISO 200."""
+
+[[templates]]
+name = "右上構図：300mm F2.8 レンズシミュレーション（生成拡張）"
+category = "image_edit"
+prompt = """Simulate shooting the existing portrait with a 300mm F2.8 super-telephoto lens.
+Retain the subject size but apply strong telephoto compression, reducing background scale and increasing spatial flattening.
+Reproduce 300mm-specific bokeh rendering: high background blur, tight subject separation, and characteristic lens breathing reduction.
+Maintain subject placement: face and eyes aligned to the upper-right rule-of-thirds intersection.
+Extend the canvas and synthesize missing environment with consistent lighting and depth cues.
+Apply virtual exposure parameters: focal length 300mm, aperture F2.8, shutter speed 1/800, ISO 200."""
+
+# 構図：三分割法 左上の交点に顔・目を配置するバージョン
+
+[[templates]]
+name = "左上構図：100mm F2 レンズシミュレーション（生成拡張）"
+category = "image_edit"
+prompt = """Recompose the portrait so the subject’s face and eyes align with the upper-left rule-of-thirds intersection.
+Simulate optical characteristics of a 100mm F2 lens while preserving the subject’s apparent size.
+Add natural telephoto compression, enhancing background proximity and depth flattening.
+Render shallow depth of field with F2 aperture behavior and smooth bokeh interpolation.
+Use image extension to synthesize peripheral areas not present in the original photo.
+Apply the following virtual capture settings: 100mm focal length, aperture F2, shutter speed 1/250, ISO 200."""
+
+[[templates]]
+name = "左上構図：300mm F2.8 レンズシミュレーション（生成拡張）"
+category = "image_edit"
+prompt = """Recompose the portrait so the face and eyes lie on the upper-left rule-of-thirds intersection.
+Simulate a 300mm F2.8 telephoto lens while maintaining the subject’s size.
+Apply strong compression: collapse background scale, increase separation, and reproduce 300mm depth geometry.
+Generate extended areas to match long-lens framing, ensuring consistent light, color, and environmental coherence.
+Render F2.8 optical behavior: high blur radius, circular bokeh highlights, and reduced perspective distortion.
+Use virtual exposure metadata: 300mm focal length, aperture F2.8, shutter speed 1/800, ISO 200."""

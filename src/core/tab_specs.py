@@ -49,7 +49,7 @@ class TabSpec:
 
 TAB_GEMINI = TabSpec(
     key="gemini_gen01",
-    display_name="画像生成（Gemini）",
+    display_name="1.テキストから生成",
     elem_id="tab-gemini-gen01",
     class_name="GeminiTab",
     category=TabCategory.GENERATION,
@@ -59,7 +59,7 @@ TAB_GEMINI = TabSpec(
 
 TAB_BASIC_EDIT = TabSpec(
     key="gemini_edit01",
-    display_name="ベーシック編集",
+    display_name="2.画像から生成",
     elem_id="tab-gemini-edit01",
     class_name="BasicEditTab",
     category=TabCategory.EDITING,
@@ -69,7 +69,7 @@ TAB_BASIC_EDIT = TabSpec(
 
 TAB_REFERENCE = TabSpec(
     key="gemini_edit02",
-    display_name="参照画像ベース生成",
+    display_name="3.複数画像から生成",
     elem_id="tab-gemini-edit02",
     class_name="ReferenceTab",
     category=TabCategory.GENERATION,
@@ -79,7 +79,7 @@ TAB_REFERENCE = TabSpec(
 
 TAB_MULTITURN_EDIT = TabSpec(
     key="gemini_edit03",
-    display_name="マルチターン編集",
+    display_name="4.マルチターン編集",
     elem_id="tab-gemini-edit03",
     class_name="MultiTurnEditTab",
     category=TabCategory.EDITING,
@@ -89,7 +89,7 @@ TAB_MULTITURN_EDIT = TabSpec(
 
 TAB_LAYOUT_EDIT = TabSpec(
     key="gemini_edit04",
-    display_name="レイアウト編集",
+    display_name="5.レイアウト編集",
     elem_id="tab-gemini-edit04",
     class_name="LayoutEditTab",
     category=TabCategory.EDITING,
@@ -99,7 +99,7 @@ TAB_LAYOUT_EDIT = TabSpec(
 
 TAB_OUTFIT_CHANGE = TabSpec(
     key="gemini_edit05",
-    display_name="衣装チェンジ",
+    display_name="6.衣装チェンジ",
     elem_id="tab-gemini-edit05",
     class_name="OutfitChangeTab",
     category=TabCategory.EDITING,
@@ -109,7 +109,7 @@ TAB_OUTFIT_CHANGE = TabSpec(
 
 TAB_ADVANCED_EDIT = TabSpec(
     key="gemini_edit06",
-    display_name="高度な編集",
+    display_name="7.高度な編集",
     elem_id="tab-gemini-edit06",
     class_name="AdvancedEditTab",
     category=TabCategory.EDITING,
@@ -119,7 +119,7 @@ TAB_ADVANCED_EDIT = TabSpec(
 
 TAB_ANALYSIS = TabSpec(
     key="gemini_other01",
-    display_name="画像解析",
+    display_name="8.画像解析",
     elem_id="tab-gemini-other01",
     class_name="AnalysisTab",
     category=TabCategory.ANALYSIS,
@@ -129,7 +129,7 @@ TAB_ANALYSIS = TabSpec(
 
 TAB_AGENT = TabSpec(
     key="gemini_other02",
-    display_name="Chat / エージェント",
+    display_name="9.Chat / エージェント",
     elem_id="tab-gemini-other02",
     class_name="AgentTab",
     category=TabCategory.EDITING,
@@ -139,7 +139,7 @@ TAB_AGENT = TabSpec(
 
 TAB_IMAGEN = TabSpec(
     key="imagen_gen01",
-    display_name="画像生成（Imagen）",
+    display_name="10.画像生成（Imagen）",
     elem_id="tab-imagen-gen01",
     class_name="ImagenTab",
     category=TabCategory.GENERATION,
@@ -149,7 +149,7 @@ TAB_IMAGEN = TabSpec(
 
 TAB_SETTINGS = TabSpec(
     key="settings",
-    display_name="Settings",
+    display_name="11.Settings",
     elem_id="tab-settings",
     class_name="SettingsTab",
     category=TabCategory.MANAGEMENT,

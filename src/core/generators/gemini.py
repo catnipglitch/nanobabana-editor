@@ -100,6 +100,11 @@ class GeminiImageGenerator(BaseImageGenerator):
                     logger.warning(f"Candidate content is None, skipping")
                     continue
 
+                # partsがNoneの場合をチェック (これがエラーの原因)
+                if candidate.content.parts is None:
+                    logger.warning("Candidate content parts is None, skipping")
+                    continue
+
                 for part in candidate.content.parts:
                     # Phase 2.6: テキスト部分を抽出
                     if hasattr(part, 'text') and part.text:

@@ -1,0 +1,9 @@
+# Multi-Turn Edit プロンプトテンプレート
+# nanobanana-editor で使用するマルチターン編集用テンプレート集
+# Tab 4 (gemini_edit03): 4.マルチターン編集
+
+# Example template structure (user will fill in actual content):
+# [[templates]]
+# name = "テンプレート名"
+# category = "multiturn_edit"
+# prompt = """プロンプト内容"""

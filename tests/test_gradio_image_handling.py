@@ -10,10 +10,10 @@ import sys
 from pathlib import Path
 
 # プロジェクトのルートディレクトリをパスに追加
-project_root = Path(__file__).parent
+project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.core.image_generator import ImageGenerator, GenerationConfig, ModelType
+from src.core.generators import TestImageGenerator, GenerationConfig, ModelType
 from src.core.output_manager import OutputManager
 from PIL import Image
 import io
@@ -25,7 +25,7 @@ def test_single_image():
     print("Testing single image generation...")
     print("=" * 60)
 
-    generator = ImageGenerator(google_api_key="dummy_key_for_test")
+    generator = TestImageGenerator(google_api_key="dummy_key_for_test")
 
     config = GenerationConfig(
         model_type=ModelType.TEST,
@@ -68,7 +68,7 @@ def test_multiple_images():
     print("Testing multiple image generation...")
     print("=" * 60)
 
-    generator = ImageGenerator(google_api_key="dummy_key_for_test")
+    generator = TestImageGenerator(google_api_key="dummy_key_for_test")
 
     config = GenerationConfig(
         model_type=ModelType.TEST,

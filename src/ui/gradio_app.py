@@ -17,14 +17,27 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
-# ロギング設定
-logger = logging.getLogger(__name__)
+# ロギング設定（ルートロガーを設定）
+# これにより、src.core.prompt_optimizer などの他モジュールのログも制御可能になります
+logger = logging.getLogger() # ルートロガーを取得
+
+# 環境変数からログレベルを設定。デフォルトはINFO
+log_level_env = os.getenv("LOG_LEVEL", "INFO").upper()
+log_level = getattr(logging, log_level_env, logging.INFO) # 無効な値ならINFOにフォールバック
+logger.setLevel(log_level)
+
+# ハンドラ設定（既存のハンドラをクリアして再設定、または追加）
 if not logger.handlers:
     handler = logging.StreamHandler()
     formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
     handler.setFormatter(formatter)
     logger.addHandler(handler)
-    logger.setLevel(logging.INFO)
+
+# モジュールロガー（自分用）
+logger = logging.getLogger(__name__)
+
+# 起動確認用ログ（強制出力）
+print(f"[{__name__}] LOGGING CONFIG: Root logger configured. LOG_LEVEL from .env = '{log_level_env}', Applied logging level = '{logging.getLevelName(log_level)}'")
 
 # プロジェクトのルートディレクトリをパスに追加
 project_root = Path(__file__).parent.parent.parent
@@ -189,17 +202,16 @@ class NanobananaApp:
 
     def create_ui(self):
         """Gradio UIを作成（11タブ構成：Phase 3.1完了版）"""
-        with gr.Blocks(title="nanobanana-editor", theme=gr.themes.Soft()) as demo:
+        with gr.Blocks(title="nanobanana-editor") as demo:
             gr.Markdown("# nanobanana-editor")
             gr.Markdown("画像生成・編集ツール - Gemini & Imagen 完全分離アーキテクチャ（11タブ構成）")
 
-            # APIキー未設定時の警告バナー
-            if self.api_key_missing:
-                gr.Markdown("""
-                ⚠️ **警告**: GOOGLE_API_KEY が設定されていません。
+            # APIキー未設定時の警告バナー（動的に更新可能）
+            self.warning_banner = gr.Markdown("""
+⚠️ **警告**: GOOGLE_API_KEY が設定されていません。
 
-                画像生成を行うには、**Settings タブ** でAPIキーを入力してください。
-                """, elem_id="warning-banner")
+画像生成を行うには、**Settings タブ** でAPIキーを入力してください。
+""", elem_id="warning-banner", visible=self.api_key_missing)
 
             # デフォルトタブを設定（APIキー未設定時はSettings強制）
             with gr.Tabs(selected=self.default_tab):
